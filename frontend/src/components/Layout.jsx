@@ -37,7 +37,7 @@ function Logo({ compact = false }) {
       </div>
       {!compact ? (
         <div className="min-w-0">
-          <p className="truncate text-lg font-black tracking-tight text-slate-950 dark:text-white">Santorini</p>
+          <p className="truncate text-lg font-black tracking-tight text-slate-950 dark:text-white">New Santorini</p>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">ERP Empresarial</p>
         </div>
       ) : null}
@@ -192,7 +192,7 @@ export default function Layout({ children }) {
                 <Icon name="menu" />
               </button>
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Santorini ERP</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">New Santorini</p>
                 <h1 className="truncate text-xl font-black tracking-tight text-slate-950 dark:text-white">{activeLabel}</h1>
               </div>
             </div>

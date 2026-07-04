@@ -1,4 +1,4 @@
-# Santorini ERP - Sistema de Gestão de Construções
+# New Santorini - Sistema de Gestao de Construcoes
 
 Sistema ERP empresarial completo para gerenciar clientes, obras, orçamentos, documentos, colaboradores, contratos e financeiro.
 
@@ -215,7 +215,7 @@ O backend pode ser hospedado em:
 
 ## 📄 Licença
 
-Este projeto é privado da Santorini Construções.
+Este projeto e privado da New Santorini.
 
 ## 👥 Suporte
 
@@ -223,4 +223,4 @@ Para dúvidas e sugestões, entre em contato com o time de desenvolvimento.
 
 ---
 
-**Santorini Construções © 2024**
+**New Santorini (c) 2024**

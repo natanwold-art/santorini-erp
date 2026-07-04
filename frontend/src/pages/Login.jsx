@@ -41,7 +41,7 @@ export default function Login() {
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-primary to-blue-900">
       <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-primary mb-2">Santorini</h1>
+          <h1 className="text-3xl font-bold text-primary mb-2">New Santorini</h1>
           <p className="text-gray-600">Sistema de Gestão de Construções</p>
         </div>
 

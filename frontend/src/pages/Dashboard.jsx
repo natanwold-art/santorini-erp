@@ -205,7 +205,7 @@ export default function Dashboard() {
     return (
       <div className="grid min-h-[70vh] place-items-center">
         <div className="w-full max-w-md rounded-3xl border border-white/70 bg-white/80 p-8 text-center shadow-premium backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
-          <Loading size="xl" text="Preparando o painel Santorini..." />
+          <Loading size="xl" text="Preparando o painel New Santorini..." />
           <div className="mt-8 grid grid-cols-3 gap-3">
             <div className="h-2 rounded-full bg-primary-100 dark:bg-cyan-400/20" />
             <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800" />
@@ -221,7 +221,7 @@ export default function Dashboard() {
       <section className="overflow-hidden rounded-3xl border border-white/70 bg-[linear-gradient(135deg,rgba(30,58,138,0.98),rgba(37,99,235,0.94)_52%,rgba(6,182,212,0.88))] p-6 text-white shadow-premium dark:border-cyan-400/20 lg:p-8">
         <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
           <div>
-            <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">Santorini ERP</p>
+            <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">New Santorini</p>
             <h2 className="mt-3 max-w-3xl text-3xl font-black tracking-tight md:text-5xl">Dashboard executivo para obras, contratos e caixa.</h2>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-blue-50 md:text-base">
               Indicadores operacionais, financeiro do mes e acompanhamento comercial em uma visao limpa para decisao rapida.
