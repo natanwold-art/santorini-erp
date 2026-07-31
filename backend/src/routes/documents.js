@@ -9,6 +9,11 @@ import {
   downloadDocument,
   previewDocumentFile,
   readDocument,
+  getDocumentFolders,
+  createDocumentFolder,
+  updateDocumentFolder,
+  deleteDocumentFolder,
+  moveDocumentToFolder,
   deleteDocument,
   getDocumentsByEntity,
 } from '../controllers/documentController.js';
@@ -34,9 +39,14 @@ router.use(authenticateToken);
 
 router.get('/', getAllDocuments);
 router.post('/upload', upload.single('file'), uploadDocument);
+router.get('/folders', getDocumentFolders);
+router.post('/folders', createDocumentFolder);
+router.put('/folders/:id', updateDocumentFolder);
+router.delete('/folders/:id', deleteDocumentFolder);
 router.get('/download/:id', downloadDocument);
 router.get('/file/:id', previewDocumentFile);
 router.get('/read/:id', readDocument);
+router.patch('/:id/folder', moveDocumentToFolder);
 router.get('/:id', getDocumentById);
 router.delete('/:id', deleteDocument);
 router.get('/:entityType/:entityId', getDocumentsByEntity);

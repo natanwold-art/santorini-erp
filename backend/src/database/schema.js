@@ -74,6 +74,17 @@ export async function createSchema(db) {
   `);
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS document_folders (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_id TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (parent_id) REFERENCES document_folders(id)
+    );
+  `);
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS documents (
       id TEXT PRIMARY KEY,
       file_name TEXT NOT NULL,
@@ -81,11 +92,13 @@ export async function createSchema(db) {
       file_size INTEGER,
       file_type TEXT,
       category TEXT NOT NULL CHECK(category IN ('contract', 'rg', 'cpf', 'nr', 'proof', 'budget', 'other')),
+      folder_id TEXT,
       client_id TEXT,
       project_id TEXT,
       employee_id TEXT,
       observations TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (folder_id) REFERENCES document_folders(id),
       FOREIGN KEY (client_id) REFERENCES clients(id),
       FOREIGN KEY (project_id) REFERENCES projects(id),
       FOREIGN KEY (employee_id) REFERENCES employees(id)
@@ -152,6 +165,11 @@ async function ensureSchemaMigrations(db) {
   await runOptionalMigration(
     db,
     'ALTER TABLE employees ADD COLUMN active BOOLEAN DEFAULT TRUE'
+  );
+
+  await runOptionalMigration(
+    db,
+    'ALTER TABLE documents ADD COLUMN folder_id TEXT REFERENCES document_folders(id)'
   );
 }
 

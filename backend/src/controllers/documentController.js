@@ -5,6 +5,7 @@ import path from 'path';
 
 const TEXT_EXTENSIONS = new Set(['.txt', '.csv', '.json', '.md', '.log', '.xml', '.html', '.css', '.js']);
 const MAX_TEXT_PREVIEW_CHARS = 60000;
+const ROOT_FOLDER_VALUES = new Set(['', 'root', 'null', 'undefined']);
 
 function repairMojibake(value = '') {
   return String(value)
@@ -45,6 +46,50 @@ function getDocumentPath(document) {
   return path.resolve(document.file_path);
 }
 
+function normalizeFolderId(value) {
+  const folderId = String(value ?? '').trim();
+  return ROOT_FOLDER_VALUES.has(folderId) ? null : folderId;
+}
+
+function getDocumentSelect() {
+  return `
+    SELECT d.*, c.name as client_name, p.name as project_name, e.name as employee_name, f.name as folder_name
+    FROM documents d
+    LEFT JOIN clients c ON d.client_id = c.id
+    LEFT JOIN projects p ON d.project_id = p.id
+    LEFT JOIN employees e ON d.employee_id = e.id
+    LEFT JOIN document_folders f ON d.folder_id = f.id
+  `;
+}
+
+async function assertFolderExists(db, folderId) {
+  if (!folderId) return null;
+
+  const folder = await db.get('SELECT * FROM document_folders WHERE id = ?', [folderId]);
+
+  if (!folder) {
+    const error = new Error('Pasta não encontrada');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return folder;
+}
+
+async function findFolderByName(db, name, parentId) {
+  if (parentId) {
+    return db.get(
+      'SELECT * FROM document_folders WHERE LOWER(name) = LOWER(?) AND parent_id = ?',
+      [name, parentId]
+    );
+  }
+
+  return db.get(
+    'SELECT * FROM document_folders WHERE LOWER(name) = LOWER(?) AND parent_id IS NULL',
+    [name]
+  );
+}
+
 async function extractDocumentText(document) {
   const filePath = getDocumentPath(document);
   const extension = path.extname(document.file_name || document.file_path).toLowerCase();
@@ -82,14 +127,23 @@ async function extractDocumentText(document) {
 export async function getAllDocuments(req, res) {
   try {
     const db = getDatabase();
-    const documents = await db.all(`
-      SELECT d.*, c.name as client_name, p.name as project_name, e.name as employee_name
-      FROM documents d
-      LEFT JOIN clients c ON d.client_id = c.id
-      LEFT JOIN projects p ON d.project_id = p.id
-      LEFT JOIN employees e ON d.employee_id = e.id
-      ORDER BY d.created_at DESC
-    `);
+    const params = [];
+    let query = getDocumentSelect();
+
+    if (Object.prototype.hasOwnProperty.call(req.query, 'folder_id')) {
+      const folderId = normalizeFolderId(req.query.folder_id);
+
+      if (folderId) {
+        query += ' WHERE d.folder_id = ?';
+        params.push(folderId);
+      } else {
+        query += ' WHERE d.folder_id IS NULL';
+      }
+    }
+
+    query += ' ORDER BY d.created_at DESC';
+
+    const documents = await db.all(query, params);
     
     res.json(documents);
   } catch (error) {
@@ -103,14 +157,7 @@ export async function getDocumentById(req, res) {
     const { id } = req.params;
     const db = getDatabase();
     
-    const document = await db.get(`
-      SELECT d.*, c.name as client_name, p.name as project_name, e.name as employee_name
-      FROM documents d
-      LEFT JOIN clients c ON d.client_id = c.id
-      LEFT JOIN projects p ON d.project_id = p.id
-      LEFT JOIN employees e ON d.employee_id = e.id
-      WHERE d.id = ?
-    `, [id]);
+    const document = await db.get(`${getDocumentSelect()} WHERE d.id = ?`, [id]);
     
     if (!document) {
       return res.status(404).json({ error: 'Documento não encontrado' });
@@ -129,7 +176,7 @@ export async function uploadDocument(req, res) {
       return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
     }
 
-    const { category, client_id, project_id, employee_id, observations } = req.body;
+    const { category, client_id, project_id, employee_id, observations, folder_id } = req.body;
 
     if (!category) {
       return res.status(400).json({ error: 'Categoria é obrigatória' });
@@ -141,11 +188,14 @@ export async function uploadDocument(req, res) {
     const fileName = repairMojibake(req.file.originalname);
     const fileSize = req.file.size;
     const fileType = req.file.mimetype;
+    const folderId = normalizeFolderId(folder_id);
+
+    await assertFolderExists(db, folderId);
 
     await db.run(
-      `INSERT INTO documents (id, file_name, file_path, file_size, file_type, category, client_id, project_id, employee_id, observations)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, fileName, filePath, fileSize, fileType, category, client_id || null, project_id || null, employee_id || null, observations]
+      `INSERT INTO documents (id, file_name, file_path, file_size, file_type, category, folder_id, client_id, project_id, employee_id, observations)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, fileName, filePath, fileSize, fileType, category, folderId, client_id || null, project_id || null, employee_id || null, observations]
     );
 
     const newDocument = await db.get('SELECT * FROM documents WHERE id = ?', [id]);
@@ -235,6 +285,165 @@ export async function readDocument(req, res) {
   } catch (error) {
     console.error('Erro ao ler documento:', error);
     res.status(500).json({ error: error.message });
+  }
+}
+
+export async function getDocumentFolders(req, res) {
+  try {
+    const db = getDatabase();
+    const includeAll = req.query.all === '1' || req.query.all === 'true';
+    const parentId = normalizeFolderId(req.query.parent_id);
+    const params = [];
+
+    let query = `
+      SELECT f.*,
+        (SELECT COUNT(*) FROM documents d WHERE d.folder_id = f.id) as document_count,
+        (SELECT COUNT(*) FROM document_folders child WHERE child.parent_id = f.id) as child_count
+      FROM document_folders f
+    `;
+
+    if (!includeAll) {
+      if (parentId) {
+        query += ' WHERE f.parent_id = ?';
+        params.push(parentId);
+      } else {
+        query += ' WHERE f.parent_id IS NULL';
+      }
+    }
+
+    query += ' ORDER BY LOWER(f.name) ASC';
+
+    const folders = await db.all(query, params);
+
+    res.json(folders);
+  } catch (error) {
+    console.error('Erro ao buscar pastas:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function createDocumentFolder(req, res) {
+  try {
+    const db = getDatabase();
+    const name = repairMojibake(req.body.name).trim();
+    const parentId = normalizeFolderId(req.body.parent_id);
+
+    if (!name) {
+      return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
+    }
+
+    await assertFolderExists(db, parentId);
+
+    const existingFolder = await findFolderByName(db, name, parentId);
+
+    if (existingFolder) {
+      return res.status(409).json({ error: 'Já existe uma pasta com este nome neste local' });
+    }
+
+    const id = generateId();
+
+    await db.run(
+      'INSERT INTO document_folders (id, name, parent_id) VALUES (?, ?, ?)',
+      [id, name, parentId]
+    );
+
+    const folder = await db.get('SELECT * FROM document_folders WHERE id = ?', [id]);
+
+    res.status(201).json(folder);
+  } catch (error) {
+    console.error('Erro ao criar pasta:', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+}
+
+export async function updateDocumentFolder(req, res) {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+    const name = repairMojibake(req.body.name).trim();
+    const parentId = Object.prototype.hasOwnProperty.call(req.body, 'parent_id')
+      ? normalizeFolderId(req.body.parent_id)
+      : undefined;
+
+    const folder = await assertFolderExists(db, id);
+
+    if (!name) {
+      return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
+    }
+
+    if (parentId !== undefined) {
+      if (parentId === id) {
+        return res.status(400).json({ error: 'A pasta não pode ser movida para dentro dela mesma' });
+      }
+
+      await assertFolderExists(db, parentId);
+    }
+
+    const nextParentId = parentId === undefined ? folder.parent_id : parentId;
+    const existingFolder = await findFolderByName(db, name, nextParentId);
+
+    if (existingFolder && existingFolder.id !== id) {
+      return res.status(409).json({ error: 'Já existe uma pasta com este nome neste local' });
+    }
+
+    await db.run(
+      'UPDATE document_folders SET name = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [name, nextParentId || null, id]
+    );
+
+    const updatedFolder = await db.get('SELECT * FROM document_folders WHERE id = ?', [id]);
+
+    res.json(updatedFolder);
+  } catch (error) {
+    console.error('Erro ao atualizar pasta:', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+}
+
+export async function deleteDocumentFolder(req, res) {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+
+    await assertFolderExists(db, id);
+
+    const documentCount = await db.get('SELECT COUNT(*) as total FROM documents WHERE folder_id = ?', [id]);
+    const childCount = await db.get('SELECT COUNT(*) as total FROM document_folders WHERE parent_id = ?', [id]);
+
+    if (Number(documentCount.total) > 0 || Number(childCount.total) > 0) {
+      return res.status(400).json({ error: 'A pasta precisa estar vazia para ser deletada' });
+    }
+
+    await db.run('DELETE FROM document_folders WHERE id = ?', [id]);
+
+    res.json({ message: 'Pasta deletada com sucesso' });
+  } catch (error) {
+    console.error('Erro ao deletar pasta:', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+}
+
+export async function moveDocumentToFolder(req, res) {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+    const folderId = normalizeFolderId(req.body.folder_id);
+    const document = await db.get('SELECT * FROM documents WHERE id = ?', [id]);
+
+    if (!document) {
+      return res.status(404).json({ error: 'Documento não encontrado' });
+    }
+
+    await assertFolderExists(db, folderId);
+
+    await db.run('UPDATE documents SET folder_id = ? WHERE id = ?', [folderId, id]);
+
+    const updatedDocument = await db.get(`${getDocumentSelect()} WHERE d.id = ?`, [id]);
+
+    res.json(updatedDocument);
+  } catch (error) {
+    console.error('Erro ao mover documento:', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 }
 

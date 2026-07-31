@@ -274,9 +274,68 @@ function summarize(files) {
 
 async function findDuplicate(db, fileName, fileSize, hash) {
   return db.get(
-    'SELECT id FROM documents WHERE file_name = ? AND file_size = ? AND observations LIKE ?',
+    'SELECT id, folder_id FROM documents WHERE file_name = ? AND file_size = ? AND observations LIKE ?',
     [fileName, fileSize, `%SHA256: ${hash}%`]
   );
+}
+
+async function findFolderByName(db, name, parentId) {
+  if (parentId) {
+    return db.get(
+      'SELECT * FROM document_folders WHERE LOWER(name) = LOWER(?) AND parent_id = ?',
+      [name, parentId]
+    );
+  }
+
+  return db.get(
+    'SELECT * FROM document_folders WHERE LOWER(name) = LOWER(?) AND parent_id IS NULL',
+    [name]
+  );
+}
+
+async function getOrCreateFolder(db, folderPath, cache) {
+  const cleanFolderPath = repairMojibake(folderPath || '').trim();
+
+  if (!cleanFolderPath || cleanFolderPath === '(raiz)') {
+    return null;
+  }
+
+  const parts = cleanFolderPath
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  let parentId = null;
+  let cacheKey = '';
+
+  for (const part of parts) {
+    cacheKey = cacheKey ? `${cacheKey}/${part}` : part;
+
+    if (cache.has(cacheKey)) {
+      parentId = cache.get(cacheKey);
+      continue;
+    }
+
+    const existingFolder = await findFolderByName(db, part, parentId);
+
+    if (existingFolder) {
+      parentId = existingFolder.id;
+      cache.set(cacheKey, parentId);
+      continue;
+    }
+
+    const id = generateId();
+
+    await db.run(
+      'INSERT INTO document_folders (id, name, parent_id) VALUES (?, ?, ?)',
+      [id, part, parentId]
+    );
+
+    parentId = id;
+    cache.set(cacheKey, parentId);
+  }
+
+  return parentId;
 }
 
 async function importDocuments({ source, dryRun, limit }) {
@@ -308,6 +367,7 @@ async function importDocuments({ source, dryRun, limit }) {
 
   const db = await initializeDatabase();
   const folderCounts = new Map();
+  const folderCache = new Map();
   const baseDate = new Date();
   const result = {
     imported: 0,
@@ -327,9 +387,14 @@ async function importDocuments({ source, dryRun, limit }) {
 
       const buffer = file.readBuffer();
       const hash = getHash(buffer);
+      const folderId = await getOrCreateFolder(db, folderPath, folderCache);
       const duplicate = await findDuplicate(db, originalFileName, buffer.length, hash);
 
       if (duplicate) {
+        if (folderId && !duplicate.folder_id) {
+          await db.run('UPDATE documents SET folder_id = ? WHERE id = ?', [folderId, duplicate.id]);
+        }
+
         result.skipped += 1;
         console.log(`SKIP ${globalOrder}/${files.length}: ${originalPath}`);
         continue;
@@ -347,8 +412,8 @@ async function importDocuments({ source, dryRun, limit }) {
       fs.writeFileSync(storedPath, buffer, { flag: 'wx' });
 
       await db.run(
-        `INSERT INTO documents (id, file_name, file_path, file_size, file_type, category, client_id, project_id, employee_id, observations, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO documents (id, file_name, file_path, file_size, file_type, category, folder_id, client_id, project_id, employee_id, observations, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           generateId(),
           originalFileName,
@@ -356,6 +421,7 @@ async function importDocuments({ source, dryRun, limit }) {
           buffer.length,
           getMimeType(originalFileName),
           inferCategory(originalPath),
+          folderId,
           null,
           null,
           null,

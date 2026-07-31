@@ -278,10 +278,41 @@ const getDocumentImportInfo = (doc) => ({
   origin: getObservationValue(doc.observations, 'Origem'),
 })
 
+const ROOT_FOLDER_ID = ''
+
+const buildFolderPath = (folders, folderId) => {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]))
+  const path = []
+  let current = byId.get(folderId)
+  let guard = 0
+
+  while (current && guard < 20) {
+    path.unshift(current)
+    current = current.parent_id ? byId.get(current.parent_id) : null
+    guard += 1
+  }
+
+  return path
+}
+
+const getFolderLabel = (folders, folder) => {
+  const path = buildFolderPath(folders, folder.id)
+  return path.map((item) => normalizeDocumentText(item.name)).join(' / ')
+}
+
 export function Documents() {
   const [documents, setDocuments] = useState([])
+  const [folders, setFolders] = useState([])
+  const [allFolders, setAllFolders] = useState([])
+  const [currentFolderId, setCurrentFolderId] = useState(ROOT_FOLDER_ID)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showFolderModal, setShowFolderModal] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploadFolderId, setUploadFolderId] = useState(ROOT_FOLDER_ID)
+  const [movingDocument, setMovingDocument] = useState(null)
+  const [moveFolderId, setMoveFolderId] = useState(ROOT_FOLDER_ID)
   const [selectedDocument, setSelectedDocument] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [readPreview, setReadPreview] = useState(null)
@@ -289,13 +320,22 @@ export function Documents() {
   const [previewError, setPreviewError] = useState('')
 
   useEffect(() => {
-    fetchDocuments()
-  }, [])
+    fetchFolderView()
+  }, [currentFolderId])
 
-  const fetchDocuments = async () => {
+  const fetchFolderView = async () => {
     try {
-      const response = await api.get('/documents')
-      setDocuments(response.data)
+      setLoading(true)
+      const folderParam = currentFolderId || 'root'
+      const [documentsResponse, foldersResponse, allFoldersResponse] = await Promise.all([
+        api.get('/documents', { params: { folder_id: folderParam } }),
+        api.get('/documents/folders', { params: { parent_id: folderParam } }),
+        api.get('/documents/folders', { params: { all: 1 } }),
+      ])
+
+      setDocuments(documentsResponse.data)
+      setFolders(foldersResponse.data)
+      setAllFolders(allFoldersResponse.data)
     } catch (error) {
       console.error('Erro:', error)
     } finally {
@@ -303,22 +343,59 @@ export function Documents() {
     }
   }
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+  const openUploadModal = () => {
+    setUploadFile(null)
+    setUploadFolderId(currentFolderId)
+    setShowModal(true)
+  }
+
+  const handleUploadSubmit = async (e) => {
+    e.preventDefault()
+    if (!uploadFile) return
 
     const formDataUpload = new FormData()
-    formDataUpload.append('file', file)
+    formDataUpload.append('file', uploadFile)
     formDataUpload.append('category', 'other')
+    formDataUpload.append('folder_id', uploadFolderId || '')
 
     try {
       await api.post('/documents/upload', formDataUpload, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      fetchDocuments()
+      fetchFolderView()
       setShowModal(false)
+      setUploadFile(null)
     } catch (error) {
       console.error('Erro ao fazer upload:', error)
+    }
+  }
+
+  const handleCreateFolder = async (e) => {
+    e.preventDefault()
+    const name = newFolderName.trim()
+    if (!name) return
+
+    try {
+      await api.post('/documents/folders', {
+        name,
+        parent_id: currentFolderId || null,
+      })
+      setNewFolderName('')
+      setShowFolderModal(false)
+      fetchFolderView()
+    } catch (error) {
+      alert(error.response?.data?.error || 'Erro ao criar pasta')
+    }
+  }
+
+  const handleDeleteFolder = async (folder) => {
+    if (confirm(`Deletar a pasta "${normalizeDocumentText(folder.name)}"? Ela precisa estar vazia.`)) {
+      try {
+        await api.delete(`/documents/folders/${folder.id}`)
+        fetchFolderView()
+      } catch (error) {
+        alert(error.response?.data?.error || 'Erro ao deletar pasta')
+      }
     }
   }
 
@@ -378,10 +455,30 @@ export function Documents() {
     if (confirm('Deletar documento?')) {
       try {
         await api.delete(`/documents/${id}`)
-        fetchDocuments()
+        fetchFolderView()
       } catch (error) {
         console.error('Erro:', error)
       }
+    }
+  }
+
+  const openMoveModal = (doc) => {
+    setMovingDocument(doc)
+    setMoveFolderId(doc.folder_id || ROOT_FOLDER_ID)
+  }
+
+  const handleMoveDocument = async (e) => {
+    e.preventDefault()
+    if (!movingDocument) return
+
+    try {
+      await api.patch(`/documents/${movingDocument.id}/folder`, {
+        folder_id: moveFolderId || null,
+      })
+      setMovingDocument(null)
+      fetchFolderView()
+    } catch (error) {
+      alert(error.response?.data?.error || 'Erro ao mover documento')
     }
   }
 
@@ -393,19 +490,52 @@ export function Documents() {
   const canShowPdf = selectedType.includes('pdf') || selectedKind === 'PDF'
   const canShowVideo = selectedType.startsWith('video/') || selectedKind === 'Vídeo'
   const selectedImportInfo = selectedDocument ? getDocumentImportInfo(selectedDocument) : null
+  const selectedFolderName = selectedDocument?.folder_name || selectedImportInfo?.folder
+  const currentFolderPath = buildFolderPath(allFolders, currentFolderId)
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-primary">📄 Documentos</h1>
-        <Button onClick={() => setShowModal(true)}>➕ Upload</Button>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-primary">📄 Documentos</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <button type="button" onClick={() => setCurrentFolderId(ROOT_FOLDER_ID)} className="font-semibold text-primary-700 hover:text-primary-900">Raiz</button>
+            {currentFolderPath.map((folder) => (
+              <React.Fragment key={folder.id}>
+                <span>/</span>
+                <button type="button" onClick={() => setCurrentFolderId(folder.id)} className="font-semibold text-primary-700 hover:text-primary-900">
+                  {normalizeDocumentText(folder.name)}
+                </button>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {currentFolderId ? <Button variant="outline" onClick={() => setCurrentFolderId(currentFolderPath.at(-2)?.id || ROOT_FOLDER_ID)}>Voltar</Button> : null}
+          <Button variant="outline" onClick={() => setShowFolderModal(true)}>Nova pasta</Button>
+          <Button onClick={openUploadModal}>➕ Upload</Button>
+        </div>
       </div>
 
       <Card>
+        <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {folders.map((folder) => (
+            <div key={folder.id} className="flex min-h-[132px] flex-col rounded-2xl border border-amber-200 bg-amber-50 p-4 transition hover:-translate-y-0.5 hover:shadow-card">
+              <button type="button" onClick={() => setCurrentFolderId(folder.id)} className="min-w-0 flex-1 text-left">
+                <p className="truncate text-base font-bold text-slate-950" title={normalizeDocumentText(folder.name)}>{normalizeDocumentText(folder.name)}</p>
+                <p className="mt-2 text-sm text-amber-800">{Number(folder.document_count || 0)} documentos</p>
+                <p className="text-sm text-amber-800">{Number(folder.child_count || 0)} pastas</p>
+              </button>
+              <Button size="sm" variant="ghost" className="mt-3 self-start" onClick={() => handleDeleteFolder(folder)}>Deletar pasta</Button>
+            </div>
+          ))}
+        </div>
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {documents.map((doc) => {
             const fileName = normalizeDocumentText(doc.file_name)
             const importInfo = getDocumentImportInfo(doc)
+            const folderName = doc.folder_name || importInfo.folder
             return (
               <div key={doc.id} className="flex min-h-[190px] flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-lg">
                 <div className="flex items-start justify-between gap-3">
@@ -419,25 +549,62 @@ export function Documents() {
                 <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
                   <p>{formatFileSize(doc.file_size)}</p>
                   <p className="truncate">{doc.client_name || doc.project_name || doc.employee_name || 'Sem vínculo'}</p>
-                  {importInfo.folder ? <p className="truncate" title={importInfo.folder}>Pasta: {importInfo.folder}</p> : null}
+                  {folderName ? <p className="truncate" title={folderName}>Pasta: {folderName}</p> : null}
                   {importInfo.order ? <p>Ordem na pasta: {importInfo.order}</p> : null}
                 </div>
 
                 <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
                   <Button size="sm" variant="outline" onClick={() => handlePreview(doc)}>Visualizar</Button>
                   <Button size="sm" variant="outline" onClick={() => handleDownload(doc)}>Baixar</Button>
-                  <Button size="sm" variant="danger" className="col-span-2" onClick={() => handleDelete(doc.id)}>Deletar</Button>
+                  <Button size="sm" variant="outline" onClick={() => openMoveModal(doc)}>Mover</Button>
+                  <Button size="sm" variant="danger" onClick={() => handleDelete(doc.id)}>Deletar</Button>
                 </div>
               </div>
             )
           })}
         </div>
-        {documents.length === 0 ? <div className="py-10 text-center text-slate-500">Nenhum documento enviado.</div> : null}
+        {documents.length === 0 && folders.length === 0 ? <div className="py-10 text-center text-slate-500">Nenhum documento enviado nesta pasta.</div> : null}
       </Card>
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Upload de Documento">
-        <input type="file" onChange={handleFileUpload} className="w-full" />
-        <p className="mt-3 text-sm text-slate-500">PDF, DOCX, imagens e arquivos de texto podem ser pré-visualizados ou lidos no sistema.</p>
+        <form onSubmit={handleUploadSubmit} className="space-y-4">
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Pasta</label>
+            <select value={uploadFolderId} onChange={(e) => setUploadFolderId(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100">
+              <option value="">Raiz</option>
+              {allFolders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{getFolderLabel(allFolders, folder)}</option>
+              ))}
+            </select>
+          </div>
+          <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} className="w-full" />
+          <p className="text-sm text-slate-500">PDF, DOCX, imagens e arquivos de texto podem ser pré-visualizados ou lidos no sistema.</p>
+          <Button type="submit" className="w-full" disabled={!uploadFile}>Enviar documento</Button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={showFolderModal} onClose={() => setShowFolderModal(false)} title="Nova pasta">
+        <form onSubmit={handleCreateFolder} className="space-y-4">
+          <Input label="Nome da pasta" value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} autoFocus />
+          <p className="text-sm text-slate-500">A pasta será criada dentro de {currentFolderPath.length ? normalizeDocumentText(currentFolderPath.at(-1).name) : 'Raiz'}.</p>
+          <Button type="submit" className="w-full">Criar pasta</Button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!movingDocument} onClose={() => setMovingDocument(null)} title="Mover documento">
+        <form onSubmit={handleMoveDocument} className="space-y-4">
+          <p className="text-sm font-semibold text-slate-700">{movingDocument ? normalizeDocumentText(movingDocument.file_name) : ''}</p>
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Nova pasta</label>
+            <select value={moveFolderId} onChange={(e) => setMoveFolderId(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100">
+              <option value="">Raiz</option>
+              {allFolders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{getFolderLabel(allFolders, folder)}</option>
+              ))}
+            </select>
+          </div>
+          <Button type="submit" className="w-full">Mover documento</Button>
+        </form>
       </Modal>
 
       <Modal isOpen={!!selectedDocument} onClose={closePreview} title={selectedDocument ? normalizeDocumentText(selectedDocument.file_name) : 'Documento'} size="full">
@@ -473,9 +640,9 @@ export function Documents() {
             <aside className="rounded-2xl border border-slate-200 bg-white p-4">
               <h3 className="text-base font-bold text-slate-950">Leitura do arquivo</h3>
               <p className="mt-1 text-sm text-slate-500">Extração de texto para PDF pesquisável, DOCX e arquivos de texto.</p>
-              {selectedImportInfo?.folder ? (
+              {selectedFolderName ? (
                 <div className="mt-4 rounded-xl bg-primary-50 p-3 text-sm text-primary-800">
-                  <p className="font-semibold">Pasta: {selectedImportInfo.folder}</p>
+                  <p className="font-semibold">Pasta: {selectedFolderName}</p>
                   {selectedImportInfo.order ? <p>Ordem na pasta: {selectedImportInfo.order}</p> : null}
                   {selectedImportInfo.origin ? <p className="mt-1 break-words text-xs text-primary-700">Origem: {selectedImportInfo.origin}</p> : null}
                 </div>
