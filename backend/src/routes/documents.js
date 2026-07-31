@@ -2,7 +2,16 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getAllDocuments, getDocumentById, uploadDocument, downloadDocument, deleteDocument, getDocumentsByEntity } from '../controllers/documentController.js';
+import {
+  getAllDocuments,
+  getDocumentById,
+  uploadDocument,
+  downloadDocument,
+  previewDocumentFile,
+  readDocument,
+  deleteDocument,
+  getDocumentsByEntity,
+} from '../controllers/documentController.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,9 +33,11 @@ const router = express.Router();
 router.use(authenticateToken);
 
 router.get('/', getAllDocuments);
-router.get('/:id', getDocumentById);
 router.post('/upload', upload.single('file'), uploadDocument);
 router.get('/download/:id', downloadDocument);
+router.get('/file/:id', previewDocumentFile);
+router.get('/read/:id', readDocument);
+router.get('/:id', getDocumentById);
 router.delete('/:id', deleteDocument);
 router.get('/:entityType/:entityId', getDocumentsByEntity);
 

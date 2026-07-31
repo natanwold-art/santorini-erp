@@ -3,6 +3,82 @@ import { generateId } from '../utils/helpers.js';
 import fs from 'fs';
 import path from 'path';
 
+const TEXT_EXTENSIONS = new Set(['.txt', '.csv', '.json', '.md', '.log', '.xml', '.html', '.css', '.js']);
+const MAX_TEXT_PREVIEW_CHARS = 60000;
+
+function repairMojibake(value = '') {
+  return String(value)
+    .replace(/Ã‡/g, 'Ç')
+    .replace(/Ã§/g, 'ç')
+    .replace(/Ã£/g, 'ã')
+    .replace(/Ãƒ/g, 'Ã')
+    .replace(/Ã¡/g, 'á')
+    .replace(/Ã¢/g, 'â')
+    .replace(/Ãª/g, 'ê')
+    .replace(/Ã©/g, 'é')
+    .replace(/Ã­/g, 'í')
+    .replace(/Ã³/g, 'ó')
+    .replace(/Ã´/g, 'ô')
+    .replace(/Ãµ/g, 'õ')
+    .replace(/Ãº/g, 'ú')
+    .replace(/Ã�/g, 'Á')
+    .replace(/Ã‰/g, 'É')
+    .replace(/Ã“/g, 'Ó')
+    .replace(/â€“/g, '-')
+    .replace(/â€”/g, '-')
+    .replace(/Âº/g, 'º')
+    .replace(/Âª/g, 'ª');
+}
+
+function limitPreviewText(text) {
+  if (!text) return '';
+  if (text.length <= MAX_TEXT_PREVIEW_CHARS) return text;
+  return `${text.slice(0, MAX_TEXT_PREVIEW_CHARS)}\n\n[Texto truncado para pré-visualização]`;
+}
+
+function getInlineContentDisposition(fileName) {
+  const cleanFileName = repairMojibake(fileName).replace(/[\r\n"]/g, '').trim() || 'documento';
+  return `inline; filename*=UTF-8''${encodeURIComponent(cleanFileName)}`;
+}
+
+function getDocumentPath(document) {
+  return path.resolve(document.file_path);
+}
+
+async function extractDocumentText(document) {
+  const filePath = getDocumentPath(document);
+  const extension = path.extname(document.file_name || document.file_path).toLowerCase();
+  const mimeType = document.file_type || '';
+
+  if (extension === '.pdf' || mimeType === 'application/pdf') {
+    const { PDFParse } = await import('pdf-parse');
+    const parser = new PDFParse({ data: fs.readFileSync(filePath) });
+    try {
+      const data = await parser.getText();
+      return { supported: true, kind: 'pdf', text: limitPreviewText(data.text || '') };
+    } finally {
+      await parser.destroy();
+    }
+  }
+
+  if (extension === '.docx' || mimeType.includes('wordprocessingml.document')) {
+    const mammoth = (await import('mammoth')).default;
+    const result = await mammoth.extractRawText({ path: filePath });
+    return { supported: true, kind: 'docx', text: limitPreviewText(result.value || '') };
+  }
+
+  if (mimeType.startsWith('text/') || TEXT_EXTENSIONS.has(extension)) {
+    const text = fs.readFileSync(filePath, 'utf8');
+    return { supported: true, kind: 'text', text: limitPreviewText(text) };
+  }
+
+  return {
+    supported: false,
+    kind: 'unsupported',
+    text: 'Leitura textual indisponível para este formato. Use a pré-visualização ou o download do arquivo.',
+  };
+}
+
 export async function getAllDocuments(req, res) {
   try {
     const db = getDatabase();
@@ -62,7 +138,7 @@ export async function uploadDocument(req, res) {
     const db = getDatabase();
     const id = generateId();
     const filePath = req.file.path;
-    const fileName = req.file.originalname;
+    const fileName = repairMojibake(req.file.originalname);
     const fileSize = req.file.size;
     const fileType = req.file.mimetype;
 
@@ -98,9 +174,66 @@ export async function downloadDocument(req, res) {
       return res.status(404).json({ error: 'Arquivo não encontrado no servidor' });
     }
 
-    res.download(filePath, document.file_name);
+    res.download(filePath, repairMojibake(document.file_name));
   } catch (error) {
     console.error('Erro ao fazer download:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function previewDocumentFile(req, res) {
+  try {
+    const { id } = req.params;
+    const db = getDatabase();
+    const document = await db.get('SELECT * FROM documents WHERE id = ?', [id]);
+
+    if (!document) {
+      return res.status(404).json({ error: 'Documento não encontrado' });
+    }
+
+    const filePath = getDocumentPath(document);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Arquivo não encontrado no servidor' });
+    }
+
+    res.setHeader('Content-Type', document.file_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', getInlineContentDisposition(document.file_name));
+    res.sendFile(filePath);
+  } catch (error) {
+    console.error('Erro ao pre-visualizar documento:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function readDocument(req, res) {
+  try {
+    const { id } = req.params;
+    const db = getDatabase();
+    const document = await db.get('SELECT * FROM documents WHERE id = ?', [id]);
+
+    if (!document) {
+      return res.status(404).json({ error: 'Documento não encontrado' });
+    }
+
+    const filePath = getDocumentPath(document);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Arquivo não encontrado no servidor' });
+    }
+
+    const preview = await extractDocumentText(document);
+
+    res.json({
+      id: document.id,
+      file_name: repairMojibake(document.file_name),
+      file_type: document.file_type,
+      supported: preview.supported,
+      kind: preview.kind,
+      text: preview.text,
+    });
+  } catch (error) {
+    console.error('Erro ao ler documento:', error);
     res.status(500).json({ error: error.message });
   }
 }

@@ -199,10 +199,78 @@ export function Users() {
   />
 }
 
+const MOJIBAKE_REPLACEMENTS = [
+  ['Ã‡', 'Ç'],
+  ['Ã§', 'ç'],
+  ['Ã£', 'ã'],
+  ['Ã¡', 'á'],
+  ['Ã¢', 'â'],
+  ['Ãª', 'ê'],
+  ['Ã©', 'é'],
+  ['Ã­', 'í'],
+  ['Ã³', 'ó'],
+  ['Ã´', 'ô'],
+  ['Ãµ', 'õ'],
+  ['Ãº', 'ú'],
+  ['Ã�', 'Á'],
+  ['Ã‰', 'É'],
+  ['Ã“', 'Ó'],
+  ['â€“', '-'],
+  ['â€”', '-'],
+  ['Âº', 'º'],
+  ['Âª', 'ª'],
+]
+
+const normalizeDocumentText = (value = '') => {
+  let text = String(value || '')
+  for (const [broken, fixed] of MOJIBAKE_REPLACEMENTS) {
+    text = text.replaceAll(broken, fixed)
+  }
+  return text
+}
+
+const getDocumentExtension = (fileName = '') => {
+  const parts = fileName.split('.')
+  return parts.length > 1 ? parts.pop().toLowerCase() : ''
+}
+
+const formatFileSize = (bytes = 0) => {
+  const size = Number(bytes || 0)
+  if (!size) return 'Tamanho indisponível'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const getDocumentKind = (doc) => {
+  const extension = getDocumentExtension(doc.file_name)
+  const type = doc.file_type || ''
+  if (type.includes('pdf') || extension === 'pdf') return 'PDF'
+  if (type.includes('image') || ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension)) return 'Imagem'
+  if (extension === 'docx') return 'DOCX'
+  if (['txt', 'csv', 'json', 'md', 'xml', 'html'].includes(extension) || type.startsWith('text/')) return 'Texto'
+  return extension ? extension.toUpperCase() : 'Arquivo'
+}
+
+const getCategoryLabel = (category) => ({
+  contract: 'Contrato',
+  rg: 'RG',
+  cpf: 'CPF',
+  nr: 'NR',
+  proof: 'Comprovante',
+  budget: 'Orçamento',
+  other: 'Outro',
+}[category] || normalizeDocumentText(category || 'Outro'))
+
 export function Documents() {
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [selectedDocument, setSelectedDocument] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [readPreview, setReadPreview] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
 
   useEffect(() => {
     fetchDocuments()
@@ -238,6 +306,58 @@ export function Documents() {
     }
   }
 
+  const closePreview = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl)
+    }
+    setPreviewUrl('')
+    setReadPreview(null)
+    setSelectedDocument(null)
+    setPreviewError('')
+  }
+
+  const handlePreview = async (doc) => {
+    closePreview()
+    setSelectedDocument(doc)
+    setPreviewLoading(true)
+
+    try {
+      const [fileResponse, readResponse] = await Promise.all([
+        api.get(`/documents/file/${doc.id}`, { responseType: 'blob' }),
+        api.get(`/documents/read/${doc.id}`).catch((error) => ({ error })),
+      ])
+
+      const contentType = fileResponse.headers['content-type'] || doc.file_type || 'application/octet-stream'
+      const blob = new Blob([fileResponse.data], { type: contentType })
+      setPreviewUrl(URL.createObjectURL(blob))
+
+      if (!readResponse.error) {
+        setReadPreview(readResponse.data)
+      }
+    } catch (error) {
+      console.error('Erro ao carregar pré-visualização:', error)
+      setPreviewError('Não foi possível carregar a pré-visualização deste arquivo.')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleDownload = async (doc) => {
+    try {
+      const response = await api.get(`/documents/download/${doc.id}`, { responseType: 'blob' })
+      const url = URL.createObjectURL(response.data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = normalizeDocumentText(doc.file_name)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Erro ao baixar documento:', error)
+    }
+  }
+
   const handleDelete = async (id) => {
     if (confirm('Deletar documento?')) {
       try {
@@ -251,6 +371,11 @@ export function Documents() {
 
   if (loading) return <div className="text-center py-10">Carregando...</div>
 
+  const selectedKind = selectedDocument ? getDocumentKind(selectedDocument) : ''
+  const selectedType = selectedDocument?.file_type || ''
+  const canShowImage = selectedType.startsWith('image/') || selectedKind === 'Imagem'
+  const canShowPdf = selectedType.includes('pdf') || selectedKind === 'PDF'
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -259,24 +384,77 @@ export function Documents() {
       </div>
 
       <Card>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {documents.map((doc) => (
-            <div key={doc.id} className="border rounded-lg p-4 hover:shadow-lg transition">
-              <p className="font-semibold truncate">{doc.file_name}</p>
-              <p className="text-sm text-gray-500 mb-2">{doc.category}</p>
-              <button
-                onClick={() => handleDelete(doc.id)}
-                className="w-full px-2 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
-              >
-                Deletar
-              </button>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {documents.map((doc) => {
+            const fileName = normalizeDocumentText(doc.file_name)
+            return (
+              <div key={doc.id} className="flex min-h-[190px] flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-lg">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-950" title={fileName}>{fileName}</p>
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{getDocumentKind(doc)}</p>
+                  </div>
+                  <span className="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-bold text-primary-700">{getCategoryLabel(doc.category)}</span>
+                </div>
+
+                <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                  <p>{formatFileSize(doc.file_size)}</p>
+                  <p className="truncate">{doc.client_name || doc.project_name || doc.employee_name || 'Sem vínculo'}</p>
+                </div>
+
+                <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
+                  <Button size="sm" variant="outline" onClick={() => handlePreview(doc)}>Visualizar</Button>
+                  <Button size="sm" variant="outline" onClick={() => handleDownload(doc)}>Baixar</Button>
+                  <Button size="sm" variant="danger" className="col-span-2" onClick={() => handleDelete(doc.id)}>Deletar</Button>
+                </div>
+              </div>
+            )
+          })}
         </div>
+        {documents.length === 0 ? <div className="py-10 text-center text-slate-500">Nenhum documento enviado.</div> : null}
       </Card>
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Upload de Documento">
         <input type="file" onChange={handleFileUpload} className="w-full" />
+        <p className="mt-3 text-sm text-slate-500">PDF, DOCX, imagens e arquivos de texto podem ser pré-visualizados ou lidos no sistema.</p>
+      </Modal>
+
+      <Modal isOpen={!!selectedDocument} onClose={closePreview} title={selectedDocument ? normalizeDocumentText(selectedDocument.file_name) : 'Documento'} size="full">
+        {previewLoading ? (
+          <div className="py-16 text-center text-slate-500">Carregando pré-visualização...</div>
+        ) : previewError ? (
+          <div className="rounded-xl bg-rose-50 p-4 text-sm font-semibold text-rose-700">{previewError}</div>
+        ) : selectedDocument ? (
+          <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+            <div className="min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+              {canShowPdf && previewUrl ? (
+                <iframe title="Pré-visualização PDF" src={previewUrl} className="h-[72vh] w-full" />
+              ) : canShowImage && previewUrl ? (
+                <div className="grid min-h-[520px] place-items-center p-4">
+                  <img src={previewUrl} alt={normalizeDocumentText(selectedDocument.file_name)} className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-card" />
+                </div>
+              ) : readPreview?.supported ? (
+                <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap p-5 text-sm leading-6 text-slate-700">{readPreview.text || 'Arquivo sem texto extraído.'}</pre>
+              ) : (
+                <div className="grid min-h-[520px] place-items-center p-6 text-center text-slate-500">
+                  <div>
+                    <p className="text-lg font-bold text-slate-700">Pré-visualização visual indisponível</p>
+                    <p className="mt-2 text-sm">Use a leitura textual quando disponível ou baixe o arquivo.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <aside className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="text-base font-bold text-slate-950">Leitura do arquivo</h3>
+              <p className="mt-1 text-sm text-slate-500">Extração de texto para PDF pesquisável, DOCX e arquivos de texto.</p>
+              <div className="mt-4 max-h-[56vh] overflow-auto rounded-xl bg-slate-50 p-4">
+                <pre className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{readPreview?.text || 'Texto não disponível para este formato.'}</pre>
+              </div>
+              <Button className="mt-4 w-full" variant="outline" onClick={() => handleDownload(selectedDocument)}>Baixar arquivo original</Button>
+            </aside>
+          </div>
+        ) : null}
       </Modal>
     </div>
   )
