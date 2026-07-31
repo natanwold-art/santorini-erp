@@ -247,8 +247,10 @@ const getDocumentKind = (doc) => {
   const type = doc.file_type || ''
   if (type.includes('pdf') || extension === 'pdf') return 'PDF'
   if (type.includes('image') || ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension)) return 'Imagem'
+  if (type.includes('video') || ['mp4', 'webm', 'mov'].includes(extension)) return 'Vídeo'
   if (extension === 'docx') return 'DOCX'
   if (['txt', 'csv', 'json', 'md', 'xml', 'html'].includes(extension) || type.startsWith('text/')) return 'Texto'
+  if (extension === 'zip') return 'ZIP'
   return extension ? extension.toUpperCase() : 'Arquivo'
 }
 
@@ -261,6 +263,20 @@ const getCategoryLabel = (category) => ({
   budget: 'Orçamento',
   other: 'Outro',
 }[category] || normalizeDocumentText(category || 'Outro'))
+
+const getObservationValue = (observations = '', label) => {
+  const line = String(observations || '')
+    .split('\n')
+    .find((item) => item.startsWith(`${label}:`))
+
+  return line ? normalizeDocumentText(line.slice(label.length + 1).trim()) : ''
+}
+
+const getDocumentImportInfo = (doc) => ({
+  folder: getObservationValue(doc.observations, 'Pasta'),
+  order: getObservationValue(doc.observations, 'Ordem na pasta'),
+  origin: getObservationValue(doc.observations, 'Origem'),
+})
 
 export function Documents() {
   const [documents, setDocuments] = useState([])
@@ -375,6 +391,8 @@ export function Documents() {
   const selectedType = selectedDocument?.file_type || ''
   const canShowImage = selectedType.startsWith('image/') || selectedKind === 'Imagem'
   const canShowPdf = selectedType.includes('pdf') || selectedKind === 'PDF'
+  const canShowVideo = selectedType.startsWith('video/') || selectedKind === 'Vídeo'
+  const selectedImportInfo = selectedDocument ? getDocumentImportInfo(selectedDocument) : null
 
   return (
     <div className="space-y-6">
@@ -387,6 +405,7 @@ export function Documents() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {documents.map((doc) => {
             const fileName = normalizeDocumentText(doc.file_name)
+            const importInfo = getDocumentImportInfo(doc)
             return (
               <div key={doc.id} className="flex min-h-[190px] flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-lg">
                 <div className="flex items-start justify-between gap-3">
@@ -400,6 +419,8 @@ export function Documents() {
                 <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
                   <p>{formatFileSize(doc.file_size)}</p>
                   <p className="truncate">{doc.client_name || doc.project_name || doc.employee_name || 'Sem vínculo'}</p>
+                  {importInfo.folder ? <p className="truncate" title={importInfo.folder}>Pasta: {importInfo.folder}</p> : null}
+                  {importInfo.order ? <p>Ordem na pasta: {importInfo.order}</p> : null}
                 </div>
 
                 <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
@@ -433,6 +454,10 @@ export function Documents() {
                 <div className="grid min-h-[520px] place-items-center p-4">
                   <img src={previewUrl} alt={normalizeDocumentText(selectedDocument.file_name)} className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-card" />
                 </div>
+              ) : canShowVideo && previewUrl ? (
+                <div className="grid min-h-[520px] place-items-center bg-black p-4">
+                  <video src={previewUrl} controls className="max-h-[70vh] max-w-full rounded-xl" />
+                </div>
               ) : readPreview?.supported ? (
                 <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap p-5 text-sm leading-6 text-slate-700">{readPreview.text || 'Arquivo sem texto extraído.'}</pre>
               ) : (
@@ -448,6 +473,13 @@ export function Documents() {
             <aside className="rounded-2xl border border-slate-200 bg-white p-4">
               <h3 className="text-base font-bold text-slate-950">Leitura do arquivo</h3>
               <p className="mt-1 text-sm text-slate-500">Extração de texto para PDF pesquisável, DOCX e arquivos de texto.</p>
+              {selectedImportInfo?.folder ? (
+                <div className="mt-4 rounded-xl bg-primary-50 p-3 text-sm text-primary-800">
+                  <p className="font-semibold">Pasta: {selectedImportInfo.folder}</p>
+                  {selectedImportInfo.order ? <p>Ordem na pasta: {selectedImportInfo.order}</p> : null}
+                  {selectedImportInfo.origin ? <p className="mt-1 break-words text-xs text-primary-700">Origem: {selectedImportInfo.origin}</p> : null}
+                </div>
+              ) : null}
               <div className="mt-4 max-h-[56vh] overflow-auto rounded-xl bg-slate-50 p-4">
                 <pre className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{readPreview?.text || 'Texto não disponível para este formato.'}</pre>
               </div>
