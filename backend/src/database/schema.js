@@ -52,6 +52,7 @@ export async function createSchema(db) {
       budget DECIMAL(12, 2),
       cost DECIMAL(12, 2),
       observations TEXT,
+      active BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (client_id) REFERENCES clients(id)
@@ -167,6 +168,11 @@ async function ensureSchemaMigrations(db) {
   await runOptionalMigration(
     db,
     'ALTER TABLE employees ADD COLUMN active BOOLEAN DEFAULT TRUE'
+  );
+
+  await runOptionalMigration(
+    db,
+    'ALTER TABLE projects ADD COLUMN active BOOLEAN DEFAULT TRUE'
   );
 
   await runOptionalMigration(

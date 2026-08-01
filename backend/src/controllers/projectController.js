@@ -8,6 +8,7 @@ export async function getAllProjects(req, res) {
       SELECT p.*, c.name as client_name 
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
+      WHERE p.active = TRUE
       ORDER BY p.created_at DESC
     `);
     
@@ -27,7 +28,7 @@ export async function getProjectById(req, res) {
       SELECT p.*, c.name as client_name 
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
-      WHERE p.id = ?
+      WHERE p.id = ? AND p.active = TRUE
     `, [id]);
     
     if (!project) {
@@ -84,7 +85,7 @@ export async function updateProject(req, res) {
     const { name, address, address_number, address_complement, city, state, postal_code, responsible, start_date, end_date_forecast, status, budget, cost, observations } = req.body;
 
     const db = getDatabase();
-    const project = await db.get('SELECT * FROM projects WHERE id = ?', [id]);
+    const project = await db.get('SELECT * FROM projects WHERE id = ? AND active = TRUE', [id]);
 
     if (!project) {
       return res.status(404).json({ error: 'Obra não encontrada' });
@@ -100,7 +101,7 @@ export async function updateProject(req, res) {
       SELECT p.*, c.name as client_name 
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
-      WHERE p.id = ?
+      WHERE p.id = ? AND p.active = TRUE
     `, [id]);
 
     res.json(updatedProject);
@@ -115,14 +116,13 @@ export async function deleteProject(req, res) {
     const { id } = req.params;
     const db = getDatabase();
 
-    const project = await db.get('SELECT * FROM projects WHERE id = ?', [id]);
+    const project = await db.get('SELECT * FROM projects WHERE id = ? AND active = TRUE', [id]);
 
     if (!project) {
       return res.status(404).json({ error: 'Obra não encontrada' });
     }
 
-    // Soft delete - marcar como inativo
-    await db.run('UPDATE projects SET status = ? WHERE id = ?', ['finished', id]);
+    await db.run('UPDATE projects SET active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
 
     res.json({ message: 'Obra deletada com sucesso' });
   } catch (error) {
@@ -133,14 +133,18 @@ export async function deleteProject(req, res) {
 
 export async function getProjectsByStatus(req, res) {
   try {
-    const { status } = req.query;
+    const status = req.params.status || req.query.status;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status é obrigatório' });
+    }
 
     const db = getDatabase();
     const projects = await db.all(`
       SELECT p.*, c.name as client_name 
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
-      WHERE p.status = ?
+      WHERE p.status = ? AND p.active = TRUE
       ORDER BY p.created_at DESC
     `, [status]);
 

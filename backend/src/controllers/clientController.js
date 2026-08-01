@@ -28,7 +28,7 @@ export async function getClientById(req, res) {
     const documents = await db.all('SELECT * FROM documents WHERE client_id = ?', [id]);
     
     // Buscar projetos do cliente
-    const projects = await db.all('SELECT * FROM projects WHERE client_id = ?', [id]);
+    const projects = await db.all('SELECT * FROM projects WHERE client_id = ? AND active = TRUE', [id]);
 
     res.json({ ...client, documents, projects });
   } catch (error) {
