@@ -3,42 +3,135 @@ import { Card, Button, Modal, Input } from '../components/UI'
 import api from '../services/api'
 import { MODULE_PERMISSIONS, getDefaultPermissions, normalizePermissions } from '../utils/permissions'
 
+const ROOT_FOLDER_ID = ''
+
+const todayISO = () => new Date().toISOString().slice(0, 10)
+
+const getFormFields = (fields) => fields.filter((field) => !field.hideInForm && !field.readOnly)
+
+const buildInitialFormData = (fields) => getFormFields(fields).reduce((acc, field) => {
+  acc[field.key] = typeof field.defaultValue === 'function' ? field.defaultValue() : field.defaultValue ?? ''
+  return acc
+}, {})
+
+const formatCurrency = (value) => {
+  if (value === null || value === undefined || value === '') return '—'
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return value
+  return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+const formatDisplayValue = (item, field) => {
+  const value = item[field.key]
+
+  if (field.format) return field.format(value, item)
+  if (value === null || value === undefined || value === '') return '—'
+  if (field.type === 'number') return Number(value).toLocaleString('pt-BR')
+  if (field.type === 'currency') return formatCurrency(value)
+  if (field.options) return field.options.find((option) => option.value === value)?.label || value
+
+  return value
+}
+
+const buildPayload = (fields, formData) => getFormFields(fields).reduce((payload, field) => {
+  let value = formData[field.key]
+
+  if (value === undefined || value === '') {
+    payload[field.key] = field.emptyAsNull ? null : ''
+    return payload
+  }
+
+  if (field.type === 'number' || field.type === 'currency') {
+    value = Number(value)
+  }
+
+  payload[field.key] = field.transform ? field.transform(value) : value
+  return payload
+}, {})
+
 const PlaceholderPage = ({ title, endpoint, fields, icon }) => {
   const [data, setData] = useState([])
+  const [lookups, setLookups] = useState({})
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [formData, setFormData] = useState({})
+  const [formData, setFormData] = useState(buildInitialFormData(fields))
+  const [error, setError] = useState('')
 
   useEffect(() => {
     fetchData()
-  }, [])
+    fetchLookups()
+  }, [endpoint])
 
   const fetchData = async () => {
     try {
       const response = await api.get(endpoint)
-      setData(response.data)
+      setData(Array.isArray(response.data) ? response.data : [])
     } catch (error) {
       console.error('Erro:', error)
+      setError(error.response?.data?.error || `Erro ao carregar ${title.toLowerCase()}`)
     } finally {
       setLoading(false)
     }
   }
 
+  const fetchLookups = async () => {
+    const lookupFields = fields.filter((field) => field.lookupEndpoint)
+    if (lookupFields.length === 0) return
+
+    const uniqueEndpoints = [...new Set(lookupFields.map((field) => field.lookupEndpoint))]
+    const responses = await Promise.allSettled(uniqueEndpoints.map((lookupEndpoint) => api.get(lookupEndpoint)))
+    const byEndpoint = {}
+
+    uniqueEndpoints.forEach((lookupEndpoint, index) => {
+      const result = responses[index]
+      byEndpoint[lookupEndpoint] = result.status === 'fulfilled' && Array.isArray(result.value.data)
+        ? result.value.data
+        : []
+    })
+
+    setLookups(lookupFields.reduce((acc, field) => {
+      acc[field.key] = byEndpoint[field.lookupEndpoint] || []
+      return acc
+    }, {}))
+  }
+
+  const openCreateModal = () => {
+    setError('')
+    setEditingId(null)
+    setFormData(buildInitialFormData(fields))
+    setShowModal(true)
+  }
+
+  const openEditModal = (item) => {
+    setError('')
+    setEditingId(item.id)
+    setFormData({ ...buildInitialFormData(fields), ...item })
+    setShowModal(true)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setSaving(true)
+    setError('')
+
     try {
+      const payload = buildPayload(fields, formData)
       if (editingId) {
-        await api.put(`${endpoint}/${editingId}`, formData)
+        await api.put(`${endpoint}/${editingId}`, payload)
       } else {
-        await api.post(endpoint, formData)
+        await api.post(endpoint, payload)
       }
       fetchData()
       setShowModal(false)
       setEditingId(null)
-      setFormData({})
+      setFormData(buildInitialFormData(fields))
     } catch (error) {
       console.error('Erro:', error)
+      setError(error.response?.data?.error || 'Erro ao salvar registro')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -49,27 +142,96 @@ const PlaceholderPage = ({ title, endpoint, fields, icon }) => {
         fetchData()
       } catch (error) {
         console.error('Erro:', error)
+        setError(error.response?.data?.error || 'Erro ao deletar registro')
       }
     }
   }
+
+  const getFieldOptions = (field) => {
+    if (field.options) return field.options
+
+    return (lookups[field.key] || []).map((item) => ({
+      value: item[field.optionValue || 'id'],
+      label: typeof field.optionLabel === 'function'
+        ? field.optionLabel(item)
+        : item[field.optionLabel || 'name'],
+    }))
+  }
+
+  const renderField = (field) => {
+    const value = formData[field.key] ?? ''
+    const commonProps = {
+      key: field.key,
+      label: field.label,
+      name: field.key,
+      value,
+      required: field.required,
+      onChange: (e) => setFormData({ ...formData, [field.key]: e.target.value }),
+    }
+
+    if (field.type === 'select') {
+      const options = getFieldOptions(field)
+
+      return (
+        <div key={field.key}>
+          <label className="mb-2 block text-sm font-semibold text-slate-700">{field.label}</label>
+          <select
+            name={field.key}
+            value={value}
+            required={field.required}
+            onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100"
+          >
+            <option value="">{field.placeholder || 'Selecione'}</option>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          {field.lookupEndpoint && options.length === 0 ? (
+            <p className="mt-1 text-xs font-semibold text-amber-600">{field.emptyMessage || 'Cadastre um item relacionado antes de salvar.'}</p>
+          ) : null}
+        </div>
+      )
+    }
+
+    if (field.type === 'textarea') {
+      return (
+        <div key={field.key}>
+          <label className="mb-2 block text-sm font-semibold text-slate-700">{field.label}</label>
+          <textarea
+            name={field.key}
+            value={value}
+            required={field.required}
+            rows={field.rows || 3}
+            onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100"
+          />
+        </div>
+      )
+    }
+
+    return <Input {...commonProps} type={field.type === 'currency' ? 'number' : field.type || 'text'} step={field.step} min={field.min} />
+  }
+
+  const tableFields = fields.filter((field) => !field.hideInTable)
 
   if (loading) return <div className="text-center py-10">Carregando...</div>
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-primary">{icon} {title}</h1>
-        <Button onClick={() => { setEditingId(null); setFormData({}); setShowModal(true) }}>
-          ➕ Novo
-        </Button>
+        <h1 className="text-3xl font-bold text-primary">{icon ? `${icon} ${title}` : title}</h1>
+        <Button onClick={openCreateModal}>Novo</Button>
       </div>
+
+      {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</div> : null}
 
       <Card>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-100 border-b-2 border-primary">
-                {fields.map((f) => (
+                {tableFields.map((f) => (
                   <th key={f.key} className="px-4 py-3 text-left font-semibold">{f.label}</th>
                 ))}
                 <th className="px-4 py-3 text-left font-semibold">Ações</th>
@@ -78,14 +240,14 @@ const PlaceholderPage = ({ title, endpoint, fields, icon }) => {
             <tbody>
               {data.map((item) => (
                 <tr key={item.id} className="border-b hover:bg-gray-50">
-                  {fields.map((f) => (
+                  {tableFields.map((f) => (
                     <td key={f.key} className="px-4 py-3">
-                      {item[f.key] || '—'}
+                      {formatDisplayValue(item, f)}
                     </td>
                   ))}
                   <td className="px-4 py-3 flex gap-2">
                     <button
-                      onClick={() => { setFormData(item); setEditingId(item.id); setShowModal(true) }}
+                      onClick={() => openEditModal(item)}
                       className="px-2 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
                     >
                       Editar
@@ -107,19 +269,11 @@ const PlaceholderPage = ({ title, endpoint, fields, icon }) => {
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Editar' : 'Novo'}>
         <form onSubmit={handleSubmit} className="space-y-3">
-          {fields.map((f) => (
-            <Input
-              key={f.key}
-              label={f.label}
-              name={f.key}
-              type={f.type || 'text'}
-              value={formData[f.key] || ''}
-              onChange={(e) => setFormData({ ...formData, [f.key]: e.target.value })}
-            />
-          ))}
+          {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</div> : null}
+          {getFormFields(fields).map(renderField)}
           <div className="flex gap-2 pt-4">
-            <Button type="submit" className="flex-1 justify-center">✅ Salvar</Button>
-            <Button type="button" variant="secondary" onClick={() => setShowModal(false)} className="flex-1 justify-center">✕ Cancelar</Button>
+            <Button type="submit" className="flex-1 justify-center" loading={saving}>Salvar</Button>
+            <Button type="button" variant="secondary" onClick={() => setShowModal(false)} className="flex-1 justify-center">Cancelar</Button>
           </div>
         </form>
       </Modal>
@@ -130,14 +284,27 @@ const PlaceholderPage = ({ title, endpoint, fields, icon }) => {
 export function Budgets() {
   return <PlaceholderPage
     title="Orçamentos"
-    icon="📋"
+    icon=""
     endpoint="/budgets"
     fields={[
-      { key: 'service_type', label: 'Tipo de Serviço' },
-      { key: 'square_meters', label: 'Metragem', type: 'number' },
-      { key: 'value_per_meter', label: 'Valor/m²', type: 'number' },
-      { key: 'total_value', label: 'Total' },
-      { key: 'status', label: 'Status' },
+      { key: 'client_id', label: 'Cliente', type: 'select', required: true, lookupEndpoint: '/clients', optionLabel: 'name', hideInTable: true },
+      { key: 'client_name', label: 'Cliente', hideInForm: true },
+      { key: 'service_type', label: 'Tipo de Serviço', required: true },
+      { key: 'square_meters', label: 'Metragem', type: 'number', step: '0.01', min: '0', required: true },
+      { key: 'value_per_meter', label: 'Valor/m²', type: 'currency', step: '0.01', min: '0', required: true },
+      { key: 'total_value', label: 'Total', type: 'currency', hideInForm: true },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        defaultValue: 'analysis',
+        options: [
+          { value: 'analysis', label: 'Em análise' },
+          { value: 'approved', label: 'Aprovado' },
+          { value: 'rejected', label: 'Rejeitado' },
+        ],
+      },
+      { key: 'observations', label: 'Observações', type: 'textarea', hideInTable: true },
     ]}
   />
 }
@@ -145,14 +312,25 @@ export function Budgets() {
 export function Employees() {
   return <PlaceholderPage
     title="Colaboradores"
-    icon="👷"
+    icon=""
     endpoint="/employees"
     fields={[
-      { key: 'name', label: 'Nome' },
+      { key: 'name', label: 'Nome', required: true },
       { key: 'cpf', label: 'CPF' },
-      { key: 'position', label: 'Cargo' },
+      { key: 'position', label: 'Cargo', required: true },
       { key: 'phone', label: 'Telefone' },
-      { key: 'status', label: 'Status' },
+      { key: 'admission_date', label: 'Admissão', type: 'date', hideInTable: true },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        defaultValue: 'active',
+        options: [
+          { value: 'active', label: 'Ativo' },
+          { value: 'inactive', label: 'Inativo' },
+        ],
+      },
+      { key: 'observations', label: 'Observações', type: 'textarea', hideInTable: true },
     ]}
   />
 }
@@ -160,13 +338,29 @@ export function Employees() {
 export function Contracts() {
   return <PlaceholderPage
     title="Contratos"
-    icon="📑"
+    icon=""
     endpoint="/contracts"
     fields={[
-      { key: 'contract_number', label: 'Nº Contrato' },
-      { key: 'value', label: 'Valor', type: 'number' },
-      { key: 'start_date', label: 'Data Início', type: 'date' },
-      { key: 'status', label: 'Status' },
+      { key: 'client_id', label: 'Cliente', type: 'select', required: true, lookupEndpoint: '/clients', optionLabel: 'name', hideInTable: true },
+      { key: 'client_name', label: 'Cliente', hideInForm: true },
+      { key: 'project_id', label: 'Obra', type: 'select', lookupEndpoint: '/projects', optionLabel: 'name', emptyAsNull: true, hideInTable: true },
+      { key: 'project_name', label: 'Obra', hideInForm: true },
+      { key: 'contract_number', label: 'Nº Contrato', emptyAsNull: true },
+      { key: 'value', label: 'Valor', type: 'currency', step: '0.01', min: '0', required: true },
+      { key: 'start_date', label: 'Data Início', type: 'date', required: true },
+      { key: 'end_date', label: 'Data Fim', type: 'date', hideInTable: true },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        defaultValue: 'active',
+        options: [
+          { value: 'active', label: 'Ativo' },
+          { value: 'finished', label: 'Finalizado' },
+          { value: 'cancelled', label: 'Cancelado' },
+        ],
+      },
+      { key: 'observations', label: 'Observações', type: 'textarea', hideInTable: true },
     ]}
   />
 }
@@ -174,14 +368,28 @@ export function Contracts() {
 export function Finance() {
   return <PlaceholderPage
     title="Financeiro"
-    icon="💰"
+    icon=""
     endpoint="/finance"
     fields={[
-      { key: 'type', label: 'Tipo' },
-      { key: 'description', label: 'Descrição' },
-      { key: 'value', label: 'Valor', type: 'number' },
-      { key: 'date', label: 'Data', type: 'date' },
-      { key: 'category', label: 'Categoria' },
+      {
+        key: 'type',
+        label: 'Tipo',
+        type: 'select',
+        required: true,
+        defaultValue: 'expense',
+        options: [
+          { value: 'income', label: 'Receita' },
+          { value: 'expense', label: 'Despesa' },
+        ],
+      },
+      { key: 'description', label: 'Descrição', required: true },
+      { key: 'value', label: 'Valor', type: 'currency', step: '0.01', min: '0', required: true },
+      { key: 'date', label: 'Data', type: 'date', defaultValue: todayISO, required: true },
+      { key: 'category', label: 'Categoria', required: true },
+      { key: 'project_id', label: 'Obra', type: 'select', lookupEndpoint: '/projects', optionLabel: 'name', emptyAsNull: true, hideInTable: true },
+      { key: 'project_name', label: 'Obra', hideInForm: true },
+      { key: 'payment_method', label: 'Forma de pagamento', hideInTable: true },
+      { key: 'notes', label: 'Observações', type: 'textarea', hideInTable: true },
     ]}
   />
 }
@@ -494,8 +702,6 @@ const getDocumentImportInfo = (doc) => ({
   origin: getObservationValue(doc.observations, 'Origem'),
 })
 
-const ROOT_FOLDER_ID = ''
-
 const buildFolderPath = (folders, folderId) => {
   const byId = new Map(folders.map((folder) => [folder.id, folder]))
   const path = []
@@ -785,7 +991,7 @@ export function Documents() {
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Upload de Documento">
         <form onSubmit={handleUploadSubmit} className="space-y-4">
           <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Pasta</label>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Pasta do documento</label>
             <select value={uploadFolderId} onChange={(e) => setUploadFolderId(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100">
               <option value="">Raiz</option>
               {allFolders.map((folder) => (
@@ -795,7 +1001,10 @@ export function Documents() {
           </div>
           <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} className="w-full" />
           <p className="text-sm text-slate-500">PDF, DOCX, imagens e arquivos de texto podem ser pré-visualizados ou lidos no sistema.</p>
-          <Button type="submit" className="w-full" disabled={!uploadFile}>Enviar documento</Button>
+          <div className="flex gap-2">
+            <Button type="submit" className="flex-1 justify-center" disabled={!uploadFile}>Salvar documento</Button>
+            <Button type="button" variant="secondary" onClick={() => setShowModal(false)} className="flex-1 justify-center">Cancelar</Button>
+          </div>
         </form>
       </Modal>
 
@@ -803,7 +1012,10 @@ export function Documents() {
         <form onSubmit={handleCreateFolder} className="space-y-4">
           <Input label="Nome da pasta" value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} autoFocus />
           <p className="text-sm text-slate-500">A pasta será criada dentro de {currentFolderPath.length ? normalizeDocumentText(currentFolderPath.at(-1).name) : 'Raiz'}.</p>
-          <Button type="submit" className="w-full">Criar pasta</Button>
+          <div className="flex gap-2">
+            <Button type="submit" className="flex-1 justify-center">Salvar pasta</Button>
+            <Button type="button" variant="secondary" onClick={() => setShowFolderModal(false)} className="flex-1 justify-center">Cancelar</Button>
+          </div>
         </form>
       </Modal>
 
@@ -819,7 +1031,10 @@ export function Documents() {
               ))}
             </select>
           </div>
-          <Button type="submit" className="w-full">Mover documento</Button>
+          <div className="flex gap-2">
+            <Button type="submit" className="flex-1 justify-center">Salvar alteração</Button>
+            <Button type="button" variant="secondary" onClick={() => setMovingDocument(null)} className="flex-1 justify-center">Cancelar</Button>
+          </div>
         </form>
       </Modal>
 

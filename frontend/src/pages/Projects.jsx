@@ -2,6 +2,26 @@ import React, { useState, useEffect } from 'react'
 import { Card, Button, Modal, Input } from '../components/UI'
 import api from '../services/api'
 
+const emptyProjectForm = {
+  client_id: '',
+  name: '',
+  address: '',
+  address_number: '',
+  city: '',
+  responsible: '',
+  start_date: '',
+  end_date_forecast: '',
+  budget: '',
+  observations: '',
+}
+
+const formatCurrency = (value) => {
+  if (value === null || value === undefined || value === '') return '—'
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return '—'
+  return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
 export default function Projects() {
   const [projects, setProjects] = useState([])
   const [clients, setClients] = useState([])
@@ -10,18 +30,8 @@ export default function Projects() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [editingId, setEditingId] = useState(null)
-  const [formData, setFormData] = useState({
-    client_id: '',
-    name: '',
-    address: '',
-    address_number: '',
-    city: '',
-    responsible: '',
-    start_date: '',
-    end_date_forecast: '',
-    budget: '',
-    observations: '',
-  })
+  const [formData, setFormData] = useState(emptyProjectForm)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     fetchData()
@@ -30,14 +40,27 @@ export default function Projects() {
   const fetchData = async () => {
     try {
       setLoading(true)
-      const [projectsRes, clientsRes] = await Promise.all([
+      setError('')
+      const [projectsRes, clientsRes] = await Promise.allSettled([
         api.get('/projects'),
         api.get('/clients'),
       ])
-      setProjects(projectsRes.data)
-      setClients(clientsRes.data)
+
+      if (projectsRes.status === 'fulfilled') {
+        setProjects(Array.isArray(projectsRes.value.data) ? projectsRes.value.data : [])
+      } else {
+        setProjects([])
+        setError(projectsRes.reason?.response?.data?.error || 'Erro ao carregar obras')
+      }
+
+      if (clientsRes.status === 'fulfilled') {
+        setClients(Array.isArray(clientsRes.value.data) ? clientsRes.value.data : [])
+      } else {
+        setClients([])
+      }
     } catch (error) {
       console.error('Erro ao buscar dados:', error)
+      setError(error.response?.data?.error || 'Erro ao carregar obras')
     } finally {
       setLoading(false)
     }
@@ -50,22 +73,30 @@ export default function Projects() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setError('')
+
     try {
+      const payload = {
+        ...formData,
+        budget: formData.budget === '' ? null : Number(formData.budget),
+      }
+
       if (editingId) {
-        await api.put(`/projects/${editingId}`, formData)
+        await api.put(`/projects/${editingId}`, payload)
       } else {
-        await api.post('/projects', formData)
+        await api.post('/projects', payload)
       }
       fetchData()
       handleCloseModal()
     } catch (error) {
       console.error('Erro ao salvar obra:', error)
-      alert('Erro ao salvar obra')
+      setError(error.response?.data?.error || 'Erro ao salvar obra')
     }
   }
 
   const handleEdit = (project) => {
-    setFormData(project)
+    setError('')
+    setFormData({ ...emptyProjectForm, ...project, budget: project.budget ?? '' })
     setEditingId(project.id)
     setShowModal(true)
   }
@@ -76,24 +107,14 @@ export default function Projects() {
       fetchData()
     } catch (error) {
       console.error('Erro ao deletar obra:', error)
+      setError(error.response?.data?.error || 'Erro ao deletar obra')
     }
   }
 
   const handleCloseModal = () => {
     setShowModal(false)
     setEditingId(null)
-    setFormData({
-      client_id: '',
-      name: '',
-      address: '',
-      address_number: '',
-      city: '',
-      responsible: '',
-      start_date: '',
-      end_date_forecast: '',
-      budget: '',
-      observations: '',
-    })
+    setFormData(emptyProjectForm)
   }
 
   const statusLabels = {
@@ -115,8 +136,10 @@ export default function Projects() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-primary">Obras</h1>
-        <Button onClick={() => setShowModal(true)}>➕ Nova Obra</Button>
+        <Button onClick={() => { setError(''); setShowModal(true) }}>Nova Obra</Button>
       </div>
+
+      {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</div> : null}
 
       <Card>
         <div className="mb-4 flex gap-3">
@@ -157,7 +180,7 @@ export default function Projects() {
                 <strong>Responsável:</strong> {project.responsible || '—'}
               </p>
               <p className="text-sm mb-3">
-                <strong>Orçamento:</strong> R$ {project.budget?.toFixed(2) || '—'}
+                <strong>Orçamento:</strong> {formatCurrency(project.budget)}
               </p>
               <div className="flex gap-2">
                 <button
@@ -186,6 +209,7 @@ export default function Projects() {
 
       <Modal isOpen={showModal} onClose={handleCloseModal} title={editingId ? 'Editar Obra' : 'Nova Obra'}>
         <form onSubmit={handleSubmit} className="space-y-3">
+          {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</div> : null}
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Cliente *</label>
             <select
@@ -202,6 +226,9 @@ export default function Projects() {
                 </option>
               ))}
             </select>
+            {clients.length === 0 ? (
+              <p className="mt-1 text-xs font-semibold text-amber-600">Cadastre um cliente antes de salvar uma obra.</p>
+            ) : null}
           </div>
           <Input label="Nome da Obra *" name="name" value={formData.name} onChange={handleInputChange} required />
           <Input label="Endereço *" name="address" value={formData.address} onChange={handleInputChange} required />
@@ -244,10 +271,10 @@ export default function Projects() {
           />
           <div className="flex gap-2 pt-4">
             <Button type="submit" className="flex-1 justify-center">
-              ✅ Salvar
+              Salvar
             </Button>
             <Button type="button" variant="secondary" onClick={handleCloseModal} className="flex-1 justify-center">
-              ✕ Cancelar
+              Cancelar
             </Button>
           </div>
         </form>
