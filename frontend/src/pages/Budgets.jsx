@@ -186,17 +186,181 @@ export function Finance() {
 }
 
 export function Users() {
-  return <PlaceholderPage
-    title="Usuários"
-    icon="🔐"
-    endpoint="/users"
-    fields={[
-      { key: 'name', label: 'Nome' },
-      { key: 'email', label: 'Email', type: 'email' },
-      { key: 'role', label: 'Papel' },
-      { key: 'active', label: 'Ativo' },
-    ]}
-  />
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [error, setError] = useState('')
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'operational',
+    active: true,
+  })
+
+  useEffect(() => {
+    fetchUsers()
+  }, [])
+
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/users')
+      setUsers(response.data)
+    } catch (error) {
+      console.error('Erro ao buscar usuários:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const openCreateModal = () => {
+    setEditingId(null)
+    setError('')
+    setFormData({
+      name: '',
+      email: '',
+      password: '',
+      role: 'operational',
+      active: true,
+    })
+    setShowModal(true)
+  }
+
+  const openEditModal = (user) => {
+    setEditingId(user.id)
+    setError('')
+    setFormData({
+      name: user.name || '',
+      email: user.email || '',
+      password: '',
+      role: user.role || 'operational',
+      active: user.active === true || user.active === 1,
+    })
+    setShowModal(true)
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+
+    if (!editingId && !formData.password.trim()) {
+      setError('Informe uma senha para criar o usuário.')
+      return
+    }
+
+    const payload = {
+      name: formData.name.trim(),
+      email: formData.email.trim(),
+      role: formData.role,
+      active: formData.active,
+    }
+
+    if (!editingId) {
+      payload.password = formData.password
+    }
+
+    try {
+      if (editingId) {
+        await api.put(`/users/${editingId}`, payload)
+      } else {
+        await api.post('/users', payload)
+      }
+
+      await fetchUsers()
+      setShowModal(false)
+    } catch (error) {
+      setError(error.response?.data?.error || 'Não foi possível salvar o usuário.')
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (confirm('Desativar usuário?')) {
+      try {
+        await api.delete(`/users/${id}`)
+        fetchUsers()
+      } catch (error) {
+        alert(error.response?.data?.error || 'Erro ao desativar usuário')
+      }
+    }
+  }
+
+  const roleLabel = {
+    admin: 'Admin',
+    financial: 'Financeiro',
+    operational: 'Operacional',
+  }
+
+  if (loading) return <div className="text-center py-10">Carregando...</div>
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold text-primary">🔐 Usuários</h1>
+        <Button onClick={openCreateModal}>➕ Novo</Button>
+      </div>
+
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-100 border-b-2 border-primary">
+                <th className="px-4 py-3 text-left font-semibold">Nome</th>
+                <th className="px-4 py-3 text-left font-semibold">Email</th>
+                <th className="px-4 py-3 text-left font-semibold">Papel</th>
+                <th className="px-4 py-3 text-left font-semibold">Status</th>
+                <th className="px-4 py-3 text-left font-semibold">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id} className="border-b hover:bg-gray-50">
+                  <td className="px-4 py-3 font-semibold">{user.name}</td>
+                  <td className="px-4 py-3">{user.email}</td>
+                  <td className="px-4 py-3">{roleLabel[user.role] || user.role}</td>
+                  <td className="px-4 py-3">{user.active === true || user.active === 1 ? 'Ativo' : 'Inativo'}</td>
+                  <td className="px-4 py-3 flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => openEditModal(user)}>Editar</Button>
+                    <Button size="sm" variant="danger" onClick={() => handleDelete(user.id)}>Desativar</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {users.length === 0 && <div className="text-center py-8 text-gray-500">Nenhum usuário cadastrado</div>}
+      </Card>
+
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Editar usuário' : 'Novo usuário'}>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</div> : null}
+          <Input label="Nome" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
+          <Input label="Email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} required />
+          {!editingId ? (
+            <Input label="Senha" type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} required />
+          ) : null}
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Papel</label>
+            <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100">
+              <option value="admin">Admin</option>
+              <option value="financial">Financeiro</option>
+              <option value="operational">Operacional</option>
+            </select>
+          </div>
+          {editingId ? (
+            <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input type="checkbox" checked={formData.active} onChange={(e) => setFormData({ ...formData, active: e.target.checked })} />
+              Usuário ativo
+            </label>
+          ) : null}
+          <div className="flex gap-2 pt-2">
+            <Button type="submit" className="flex-1 justify-center">Salvar</Button>
+            <Button type="button" variant="secondary" onClick={() => setShowModal(false)} className="flex-1 justify-center">Cancelar</Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  )
 }
 
 const MOJIBAKE_REPLACEMENTS = [
