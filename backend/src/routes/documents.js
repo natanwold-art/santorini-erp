@@ -17,7 +17,7 @@ import {
   deleteDocument,
   getDocumentsByEntity,
 } from '../controllers/documentController.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, authorizePermission } from '../middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,6 +36,7 @@ const upload = multer({ storage });
 const router = express.Router();
 
 router.use(authenticateToken);
+router.use(authorizePermission('documents'));
 
 router.get('/', getAllDocuments);
 router.post('/upload', upload.single('file'), uploadDocument);

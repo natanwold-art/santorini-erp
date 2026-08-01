@@ -1,10 +1,11 @@
 import express from 'express';
 import { getAllClients, getClientById, createClient, updateClient, deleteClient, searchClients } from '../controllers/clientController.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, authorizePermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.use(authenticateToken);
+router.use(authorizePermission('clients'));
 
 router.get('/', getAllClients);
 router.get('/search', searchClients);

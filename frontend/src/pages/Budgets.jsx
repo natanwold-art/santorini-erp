@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Card, Button, Modal, Input } from '../components/UI'
 import api from '../services/api'
+import { MODULE_PERMISSIONS, getDefaultPermissions, normalizePermissions } from '../utils/permissions'
 
 const PlaceholderPage = ({ title, endpoint, fields, icon }) => {
   const [data, setData] = useState([])
@@ -197,6 +198,7 @@ export function Users() {
     password: '',
     role: 'operational',
     active: true,
+    permissions: getDefaultPermissions('operational'),
   })
 
   useEffect(() => {
@@ -223,6 +225,7 @@ export function Users() {
       password: '',
       role: 'operational',
       active: true,
+      permissions: getDefaultPermissions('operational'),
     })
     setShowModal(true)
   }
@@ -236,6 +239,7 @@ export function Users() {
       password: '',
       role: user.role || 'operational',
       active: user.active === true || user.active === 1,
+      permissions: normalizePermissions(user.permissions),
     })
     setShowModal(true)
   }
@@ -254,9 +258,10 @@ export function Users() {
       email: formData.email.trim(),
       role: formData.role,
       active: formData.active,
+      permissions: formData.role === 'admin' ? [] : normalizePermissions(formData.permissions),
     }
 
-    if (!editingId) {
+    if (!editingId || formData.password.trim()) {
       payload.password = formData.password
     }
 
@@ -291,6 +296,25 @@ export function Users() {
     operational: 'Operacional',
   }
 
+  const handleRoleChange = (role) => {
+    setFormData({
+      ...formData,
+      role,
+      permissions: role === 'admin' ? [] : getDefaultPermissions(role),
+    })
+  }
+
+  const togglePermission = (permission) => {
+    if (permission === 'dashboard') return
+
+    const currentPermissions = normalizePermissions(formData.permissions)
+    const nextPermissions = currentPermissions.includes(permission)
+      ? currentPermissions.filter((item) => item !== permission)
+      : [...currentPermissions, permission]
+
+    setFormData({ ...formData, permissions: nextPermissions })
+  }
+
   if (loading) return <div className="text-center py-10">Carregando...</div>
 
   return (
@@ -308,6 +332,8 @@ export function Users() {
                 <th className="px-4 py-3 text-left font-semibold">Nome</th>
                 <th className="px-4 py-3 text-left font-semibold">Email</th>
                 <th className="px-4 py-3 text-left font-semibold">Papel</th>
+                <th className="px-4 py-3 text-left font-semibold">Permissões</th>
+                <th className="px-4 py-3 text-left font-semibold">Senha</th>
                 <th className="px-4 py-3 text-left font-semibold">Status</th>
                 <th className="px-4 py-3 text-left font-semibold">Ações</th>
               </tr>
@@ -318,6 +344,8 @@ export function Users() {
                   <td className="px-4 py-3 font-semibold">{user.name}</td>
                   <td className="px-4 py-3">{user.email}</td>
                   <td className="px-4 py-3">{roleLabel[user.role] || user.role}</td>
+                  <td className="px-4 py-3">{user.role === 'admin' ? 'Todas' : normalizePermissions(user.permissions).length}</td>
+                  <td className="px-4 py-3">{user.must_change_password ? 'Troca pendente' : 'Ok'}</td>
                   <td className="px-4 py-3">{user.active === true || user.active === 1 ? 'Ativo' : 'Inativo'}</td>
                   <td className="px-4 py-3 flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => openEditModal(user)}>Editar</Button>
@@ -336,16 +364,40 @@ export function Users() {
           {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</div> : null}
           <Input label="Nome" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
           <Input label="Email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} required />
-          {!editingId ? (
-            <Input label="Senha" type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} required />
-          ) : null}
+          <Input
+            label={editingId ? 'Nova senha provisória (opcional)' : 'Senha provisória'}
+            type="password"
+            value={formData.password}
+            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            required={!editingId}
+          />
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Papel</label>
-            <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100">
+            <select value={formData.role} onChange={(e) => handleRoleChange(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-100">
               <option value="admin">Admin</option>
               <option value="financial">Financeiro</option>
               <option value="operational">Operacional</option>
             </select>
+          </div>
+          <div className="rounded-2xl border border-slate-200 p-4">
+            <p className="text-sm font-bold text-slate-800">Permissões de acesso</p>
+            {formData.role === 'admin' ? (
+              <p className="mt-2 text-sm text-slate-500">Administrador tem acesso total ao sistema e pode criar usuários.</p>
+            ) : (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {MODULE_PERMISSIONS.map((permission) => (
+                  <label key={permission.key} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={normalizePermissions(formData.permissions).includes(permission.key)}
+                      disabled={permission.key === 'dashboard'}
+                      onChange={() => togglePermission(permission.key)}
+                    />
+                    {permission.label}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
           {editingId ? (
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">

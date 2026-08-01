@@ -1,10 +1,11 @@
 import express from 'express';
 import { getAllEmployees, getEmployeeById, createEmployee, updateEmployee, deleteEmployee } from '../controllers/employeeController.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, authorizePermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.use(authenticateToken);
+router.use(authorizePermission('employees'));
 
 router.get('/', getAllEmployees);
 router.get('/:id', getEmployeeById);

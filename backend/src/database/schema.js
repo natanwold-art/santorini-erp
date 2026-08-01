@@ -7,6 +7,8 @@ export async function createSchema(db) {
       password TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('admin', 'financial', 'operational')),
       active BOOLEAN DEFAULT TRUE,
+      permissions TEXT DEFAULT '[]',
+      must_change_password BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -170,6 +172,16 @@ async function ensureSchemaMigrations(db) {
   await runOptionalMigration(
     db,
     'ALTER TABLE documents ADD COLUMN folder_id TEXT REFERENCES document_folders(id)'
+  );
+
+  await runOptionalMigration(
+    db,
+    "ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '[]'"
+  );
+
+  await runOptionalMigration(
+    db,
+    'ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE'
   );
 }
 

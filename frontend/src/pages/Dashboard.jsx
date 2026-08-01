@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useContext, useEffect, useMemo, useState } from 'react'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import {
   ArcElement,
@@ -14,6 +14,8 @@ import {
 } from 'chart.js'
 import { Button, Card, Loading, StatsCard } from '../components/UI'
 import api from '../services/api'
+import { AuthContext } from '../context/AuthContext'
+import { canAccess } from '../utils/permissions'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend, Filler)
 
@@ -24,6 +26,7 @@ function Icon({ children }) {
 }
 
 export default function Dashboard() {
+  const { user } = useContext(AuthContext)
   const [stats, setStats] = useState({
     totalClients: 0,
     totalProjects: 0,
@@ -38,37 +41,48 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData()
-  }, [])
+  }, [user])
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true)
+      const fetchAllowed = async (permission, endpoint) => {
+        if (!canAccess(user, permission)) return []
+
+        try {
+          const response = await api.get(endpoint)
+          return response.data
+        } catch {
+          return []
+        }
+      }
+
       const [clients, projects, finance, budgets] = await Promise.all([
-        api.get('/clients'),
-        api.get('/projects'),
-        api.get('/finance'),
-        api.get('/budgets'),
+        fetchAllowed('clients', '/clients'),
+        fetchAllowed('projects', '/projects'),
+        fetchAllowed('finance', '/finance'),
+        fetchAllowed('budgets', '/budgets'),
       ])
 
       const currentMonth = new Date().toISOString().slice(0, 7)
-      const monthlyIncome = finance.data
+      const monthlyIncome = finance
         .filter((item) => item.type === 'income' && item.date?.startsWith(currentMonth))
         .reduce((sum, item) => sum + Number(item.value || 0), 0)
-      const monthlyExpenses = finance.data
+      const monthlyExpenses = finance
         .filter((item) => item.type === 'expense' && item.date?.startsWith(currentMonth))
         .reduce((sum, item) => sum + Number(item.value || 0), 0)
 
       setStats({
-        totalClients: clients.data.length,
-        totalProjects: projects.data.length,
-        projectsInProgress: projects.data.filter((project) => project.status === 'in_progress').length,
+        totalClients: clients.length,
+        totalProjects: projects.length,
+        projectsInProgress: projects.filter((project) => project.status === 'in_progress').length,
         monthlyIncome,
         monthlyExpenses,
         profit: monthlyIncome - monthlyExpenses,
       })
 
-      prepareChartData(finance.data, projects.data, budgets.data)
-      setRecentActivities(buildActivities(projects.data, clients.data, finance.data, budgets.data))
+      prepareChartData(finance, projects, budgets)
+      setRecentActivities(buildActivities(projects, clients, finance, budgets))
     } catch (error) {
       console.error('Erro ao buscar dados do dashboard:', error)
       prepareChartData([], [], [])

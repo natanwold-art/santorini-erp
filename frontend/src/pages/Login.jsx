@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { AuthContext } from '../context/AuthContext'
 
 export default function Login() {
-  const [isLogin, setIsLogin] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [formData, setFormData] = useState({
@@ -11,8 +10,9 @@ export default function Login() {
     email: '',
     password: '',
   })
-  const { login, register } = useContext(AuthContext)
+  const { login, register, needsSetup } = useContext(AuthContext)
   const navigate = useNavigate()
+  const isSetup = needsSetup
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -24,17 +24,20 @@ export default function Login() {
     setError('')
     setLoading(true)
 
-    const result = isLogin
+    const result = !isSetup
       ? await login(formData.email, formData.password)
       : await register(formData.name, formData.email, formData.password)
 
     setLoading(false)
 
     if (result.success) {
-      navigate('/')
-    } else {
-      setError(result.error)
+      if (!result.user?.must_change_password) {
+        navigate('/')
+      }
+      return
     }
+
+    setError(result.error)
   }
 
   return (
@@ -52,7 +55,7 @@ export default function Login() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLogin && (
+          {isSetup && (
             <div>
               <label className="block text-gray-700 font-semibold mb-2">Nome</label>
               <input
@@ -60,7 +63,7 @@ export default function Login() {
                 name="name"
                 value={formData.name}
                 onChange={handleChange}
-                required={!isLogin}
+                required={isSetup}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-primary"
                 placeholder="Seu nome completo"
               />
@@ -98,25 +101,15 @@ export default function Login() {
             disabled={loading}
             className="w-full bg-primary text-white py-2 rounded-lg font-semibold hover:bg-blue-800 transition disabled:opacity-50"
           >
-            {loading ? 'Processando...' : isLogin ? 'Entrar' : 'Registrar'}
+            {loading ? 'Processando...' : isSetup ? 'Criar administrador' : 'Entrar'}
           </button>
         </form>
 
-        <div className="mt-6 text-center">
-          <p className="text-gray-600">
-            {isLogin ? 'Não tem uma conta?' : 'Já tem uma conta?'}
-            <button
-              onClick={() => {
-                setIsLogin(!isLogin)
-                setError('')
-                setFormData({ name: '', email: '', password: '' })
-              }}
-              className="ml-2 text-primary font-semibold hover:underline"
-            >
-              {isLogin ? 'Registre-se' : 'Entre'}
-            </button>
+        {isSetup ? (
+          <p className="mt-6 text-center text-sm text-gray-600">
+            Este formulário aparece apenas no primeiro acesso, antes de existir um administrador.
           </p>
-        </div>
+        ) : null}
       </div>
     </div>
   )

@@ -22,6 +22,18 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.data?.must_change_password) {
+      const userData = localStorage.getItem('user')
+      if (userData) {
+        try {
+          localStorage.setItem('user', JSON.stringify({ ...JSON.parse(userData), must_change_password: true }))
+        } catch {
+          localStorage.removeItem('user')
+        }
+      }
+      window.location.href = '/'
+    }
+
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')

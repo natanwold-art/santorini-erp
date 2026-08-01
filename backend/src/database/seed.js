@@ -30,18 +30,18 @@ async function seedDatabase() {
     const operationalId = generateId()
 
     await db.run(
-      'INSERT INTO users (id, name, email, password, role, active) VALUES (?, ?, ?, ?, ?, TRUE)',
+      "INSERT INTO users (id, name, email, password, role, active, permissions, must_change_password) VALUES (?, ?, ?, ?, ?, TRUE, '[]', FALSE)",
       [adminId, 'Administrador', 'admin@santorini.com', adminPassword, 'admin']
     )
 
     await db.run(
-      'INSERT INTO users (id, name, email, password, role, active) VALUES (?, ?, ?, ?, ?, TRUE)',
-      [userId, 'Financeiro', 'financeiro@santorini.com', userPassword, 'financial']
+      "INSERT INTO users (id, name, email, password, role, active, permissions, must_change_password) VALUES (?, ?, ?, ?, ?, TRUE, ?, TRUE)",
+      [userId, 'Financeiro', 'financeiro@santorini.com', userPassword, 'financial', JSON.stringify(['dashboard', 'finance', 'documents', 'clients', 'projects', 'budgets'])]
     )
 
     await db.run(
-      'INSERT INTO users (id, name, email, password, role, active) VALUES (?, ?, ?, ?, ?, TRUE)',
-      [operationalId, 'Operacional', 'operacional@santorini.com', userPassword, 'operational']
+      "INSERT INTO users (id, name, email, password, role, active, permissions, must_change_password) VALUES (?, ?, ?, ?, ?, TRUE, ?, TRUE)",
+      [operationalId, 'Operacional', 'operacional@santorini.com', userPassword, 'operational', JSON.stringify(['dashboard', 'clients', 'projects', 'budgets', 'documents', 'employees', 'contracts'])]
     )
 
     // Criar clientes de exemplo

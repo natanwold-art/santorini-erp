@@ -12,6 +12,8 @@ import Employees from './pages/Employees'
 import Contracts from './pages/Contracts'
 import Finance from './pages/Finance'
 import Users from './pages/Users'
+import ChangePassword from './pages/ChangePassword'
+import { canAccess, getFirstAccessiblePath } from './utils/permissions'
 
 function ProtectedRoute({ children }) {
   const { user } = useContext(AuthContext)
@@ -19,25 +21,37 @@ function ProtectedRoute({ children }) {
 }
 
 function AppContent() {
-  const { user } = useContext(AuthContext)
+  const { user, loading } = useContext(AuthContext)
+
+  if (loading) {
+    return <div className="grid min-h-screen place-items-center text-slate-600">Carregando...</div>
+  }
 
   if (!user) {
     return <Login />
   }
 
+  if (user.must_change_password) {
+    return <ChangePassword />
+  }
+
+  const PermissionRoute = ({ permission, children }) => (
+    canAccess(user, permission) ? children : <Navigate to={getFirstAccessiblePath(user)} />
+  )
+
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/clientes" element={<Clients />} />
-        <Route path="/obras" element={<Projects />} />
-        <Route path="/orcamentos" element={<Budgets />} />
-        <Route path="/documentos" element={<Documents />} />
-        <Route path="/colaboradores" element={<Employees />} />
-        <Route path="/contratos" element={<Contracts />} />
-        <Route path="/financeiro" element={<Finance />} />
+        <Route path="/" element={<PermissionRoute permission="dashboard"><Dashboard /></PermissionRoute>} />
+        <Route path="/clientes" element={<PermissionRoute permission="clients"><Clients /></PermissionRoute>} />
+        <Route path="/obras" element={<PermissionRoute permission="projects"><Projects /></PermissionRoute>} />
+        <Route path="/orcamentos" element={<PermissionRoute permission="budgets"><Budgets /></PermissionRoute>} />
+        <Route path="/documentos" element={<PermissionRoute permission="documents"><Documents /></PermissionRoute>} />
+        <Route path="/colaboradores" element={<PermissionRoute permission="employees"><Employees /></PermissionRoute>} />
+        <Route path="/contratos" element={<PermissionRoute permission="contracts"><Contracts /></PermissionRoute>} />
+        <Route path="/financeiro" element={<PermissionRoute permission="finance"><Finance /></PermissionRoute>} />
         {user?.role === 'admin' && <Route path="/usuarios" element={<Users />} />}
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route path="*" element={<Navigate to={getFirstAccessiblePath(user)} />} />
       </Routes>
     </Layout>
   )

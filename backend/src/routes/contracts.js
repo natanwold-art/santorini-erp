@@ -1,10 +1,11 @@
 import express from 'express';
 import { getAllContracts, getContractById, createContract, updateContract, deleteContract } from '../controllers/contractController.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, authorizePermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.use(authenticateToken);
+router.use(authorizePermission('contracts'));
 
 router.get('/', getAllContracts);
 router.get('/:id', getContractById);

@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthContext } from '../context/AuthContext'
 import { Button } from './UI'
+import { canAccess } from '../utils/permissions'
 
 const icons = {
   dashboard: 'M3 13h8V3H3v10Zm10 8h8V3h-8v18ZM3 21h8v-6H3v6Z',
@@ -54,23 +55,23 @@ export default function Layout({ children }) {
   const [darkMode, setDarkMode] = useState(false)
 
   const menuItems = useMemo(() => [
-    { label: 'Dashboard', icon: 'dashboard', path: '/', shortcut: 'Ctrl+D' },
-    { label: 'Clientes', icon: 'clients', path: '/clientes', shortcut: 'Ctrl+C' },
-    { label: 'Obras', icon: 'projects', path: '/obras', shortcut: 'Ctrl+O' },
-    { label: 'Orcamentos', icon: 'budgets', path: '/orcamentos', shortcut: 'Ctrl+B' },
-    { label: 'Documentos', icon: 'documents', path: '/documentos', shortcut: 'Ctrl+U' },
-    { label: 'Colaboradores', icon: 'employees', path: '/colaboradores', shortcut: 'Ctrl+E' },
-    { label: 'Contratos', icon: 'contracts', path: '/contratos', shortcut: 'Ctrl+T' },
-    { label: 'Financeiro', icon: 'finance', path: '/financeiro', shortcut: 'Ctrl+F' },
-    ...(user?.role === 'admin' ? [{ label: 'Usuarios', icon: 'users', path: '/usuarios', shortcut: 'Ctrl+Y' }] : []),
-  ], [user?.role])
+    { label: 'Dashboard', icon: 'dashboard', path: '/', shortcut: 'Ctrl+D', permission: 'dashboard' },
+    { label: 'Clientes', icon: 'clients', path: '/clientes', shortcut: 'Ctrl+C', permission: 'clients' },
+    { label: 'Obras', icon: 'projects', path: '/obras', shortcut: 'Ctrl+O', permission: 'projects' },
+    { label: 'Orcamentos', icon: 'budgets', path: '/orcamentos', shortcut: 'Ctrl+B', permission: 'budgets' },
+    { label: 'Documentos', icon: 'documents', path: '/documentos', shortcut: 'Ctrl+U', permission: 'documents' },
+    { label: 'Colaboradores', icon: 'employees', path: '/colaboradores', shortcut: 'Ctrl+E', permission: 'employees' },
+    { label: 'Contratos', icon: 'contracts', path: '/contratos', shortcut: 'Ctrl+T', permission: 'contracts' },
+    { label: 'Financeiro', icon: 'finance', path: '/financeiro', shortcut: 'Ctrl+F', permission: 'finance' },
+    ...(user?.role === 'admin' ? [{ label: 'Usuarios', icon: 'users', path: '/usuarios', shortcut: 'Ctrl+Y', permission: 'users' }] : []),
+  ].filter((item) => item.permission === 'users' || canAccess(user, item.permission)), [user])
 
   const quickActions = [
-    { label: 'Novo cliente', path: '/clientes', icon: 'clients' },
-    { label: 'Nova obra', path: '/obras', icon: 'projects' },
-    { label: 'Orcamento', path: '/orcamentos', icon: 'budgets' },
-    { label: 'Lancamento', path: '/financeiro', icon: 'finance' },
-  ]
+    { label: 'Novo cliente', path: '/clientes', icon: 'clients', permission: 'clients' },
+    { label: 'Nova obra', path: '/obras', icon: 'projects', permission: 'projects' },
+    { label: 'Orcamento', path: '/orcamentos', icon: 'budgets', permission: 'budgets' },
+    { label: 'Lancamento', path: '/financeiro', icon: 'finance', permission: 'finance' },
+  ].filter((action) => canAccess(user, action.permission))
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme')
@@ -96,6 +97,9 @@ export default function Layout({ children }) {
     const handler = (event) => {
       const path = shortcuts[event.key.toLowerCase()]
       if (event.ctrlKey && path) {
+        const item = menuItems.find((menuItem) => menuItem.path === path)
+        if (!item) return
+
         event.preventDefault()
         navigate(path)
       }
@@ -103,7 +107,7 @@ export default function Layout({ children }) {
 
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [navigate])
+  }, [menuItems, navigate])
 
   const toggleDarkMode = () => {
     const next = !darkMode

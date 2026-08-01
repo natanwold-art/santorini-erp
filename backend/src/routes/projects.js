@@ -1,10 +1,11 @@
 import express from 'express';
 import { getAllProjects, getProjectById, createProject, updateProject, deleteProject, getProjectsByStatus } from '../controllers/projectController.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, authorizePermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.use(authenticateToken);
+router.use(authorizePermission('projects'));
 
 router.get('/', getAllProjects);
 router.get('/status/:status', getProjectsByStatus);

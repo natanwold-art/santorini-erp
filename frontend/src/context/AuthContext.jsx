@@ -6,17 +6,29 @@ export const AuthContext = createContext()
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [needsSetup, setNeedsSetup] = useState(false)
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    const userData = localStorage.getItem('user')
+    const initializeAuth = async () => {
+      const token = localStorage.getItem('token')
+      const userData = localStorage.getItem('user')
 
-    if (token && userData) {
-      setUser(JSON.parse(userData))
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+      if (token && userData) {
+        setUser(JSON.parse(userData))
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+      }
+
+      try {
+        const response = await api.get('/auth/setup-status')
+        setNeedsSetup(Boolean(response.data.needs_setup))
+      } catch (error) {
+        console.error('Erro ao verificar setup:', error)
+      } finally {
+        setLoading(false)
+      }
     }
 
-    setLoading(false)
+    initializeAuth()
   }, [])
 
   const login = async (email, password) => {
@@ -29,7 +41,7 @@ export function AuthProvider({ children }) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`
 
       setUser(user)
-      return { success: true }
+      return { success: true, user }
     } catch (error) {
       return { success: false, error: error.response?.data?.error || 'Erro ao fazer login' }
     }
@@ -52,14 +64,35 @@ export function AuthProvider({ children }) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`
 
       setUser(user)
-      return { success: true }
+      setNeedsSetup(false)
+      return { success: true, user }
     } catch (error) {
       return { success: false, error: error.response?.data?.error || 'Erro ao registrar' }
     }
   }
 
+  const changePassword = async (currentPassword, newPassword, confirmPassword) => {
+    try {
+      const response = await api.post('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword,
+      })
+      const { token, user } = response.data
+
+      localStorage.setItem('token', token)
+      localStorage.setItem('user', JSON.stringify(user))
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+
+      setUser(user)
+      return { success: true, user }
+    } catch (error) {
+      return { success: false, error: error.response?.data?.error || 'Erro ao trocar senha' }
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, register }}>
+    <AuthContext.Provider value={{ user, loading, needsSetup, login, logout, register, changePassword }}>
       {children}
     </AuthContext.Provider>
   )
